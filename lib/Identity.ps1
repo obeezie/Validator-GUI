@@ -91,7 +91,7 @@ function New-IdentityState {
     param(
         [string]$Status,
         [bool]$TrustedHistory,
-        [string]$SystemName,
+        [string]$UnitSerial,
         $CurrentIdentity,
         [string]$PreviousFingerprint,
         [string]$SummaryPath,
@@ -101,7 +101,7 @@ function New-IdentityState {
     return [pscustomobject]@{
         Status = $Status
         TrustedHistory = $TrustedHistory
-        SystemName = $SystemName
+        UnitSerial = $UnitSerial
         CurrentIdentity = $CurrentIdentity
         PreviousFingerprint = $PreviousFingerprint
         SummaryPath = $SummaryPath
@@ -109,41 +109,53 @@ function New-IdentityState {
     }
 }
 
-function Get-CurrentSystemIdentityState {
-    $systemName = ([string]$env:COMPUTERNAME).Trim()
-    $currentIdentity = Get-HardwareIdentity
-    $summary = Get-LatestSummary -SerialNumber $systemName
+# Compares the motherboard the validator is running on with the latest report
+# filed under a Unit Serial. History belongs to the Unit Serial, not to the
+# Windows computer name: a shared Boot Drive carries the previous unit's name
+# (a Stale Name) to the next unit, and that must not look like a Hardware Change.
+#   NEW        - no report exists for this Unit Serial
+#   UNVERIFIED - a report exists but fingerprints cannot be compared
+#   MATCH      - same motherboard as the latest report (history is trusted)
+#   MISMATCH   - different motherboard: a Hardware Change, or the wrong serial
+function Get-UnitIdentityState {
+    param(
+        [string]$UnitSerial,
+        $CurrentIdentity
+    )
+
+    $serial = ([string]$UnitSerial).Trim()
+    $summary = Get-LatestSummary -SerialNumber $serial
 
     if ($null -eq $summary) {
-        return New-IdentityState -Status "NEW" -TrustedHistory $false -SystemName $systemName `
-            -CurrentIdentity $currentIdentity -PreviousFingerprint "" -SummaryPath "" `
-            -Detail "No previous report exists for the current Windows computer name."
+        return New-IdentityState -Status "NEW" -TrustedHistory $false -UnitSerial $serial `
+            -CurrentIdentity $CurrentIdentity -PreviousFingerprint "" -SummaryPath "" `
+            -Detail "No previous report exists for unit '$serial'."
     }
 
     $summaryPath = [string]$summary.FullName
     $previousFingerprint = [string](Get-HardwareFingerprintFromSummary -Path $summaryPath)
 
     if ([string]::IsNullOrWhiteSpace($previousFingerprint)) {
-        return New-IdentityState -Status "UNVERIFIED" -TrustedHistory $false -SystemName $systemName `
-            -CurrentIdentity $currentIdentity -PreviousFingerprint "" -SummaryPath $summaryPath `
+        return New-IdentityState -Status "UNVERIFIED" -TrustedHistory $false -UnitSerial $serial `
+            -CurrentIdentity $CurrentIdentity -PreviousFingerprint "" -SummaryPath $summaryPath `
             -Detail "Previous report found, but it predates hardware fingerprint tracking. Configuration history will not be trusted automatically."
     }
 
-    if ([string]::IsNullOrWhiteSpace([string]$currentIdentity.Fingerprint)) {
-        return New-IdentityState -Status "UNVERIFIED" -TrustedHistory $false -SystemName $systemName `
-            -CurrentIdentity $currentIdentity -PreviousFingerprint $previousFingerprint -SummaryPath $summaryPath `
-            -Detail "This system does not expose enough usable motherboard/system identifiers to verify the previous report."
+    if ([string]::IsNullOrWhiteSpace([string]$CurrentIdentity.Fingerprint)) {
+        return New-IdentityState -Status "UNVERIFIED" -TrustedHistory $false -UnitSerial $serial `
+            -CurrentIdentity $CurrentIdentity -PreviousFingerprint $previousFingerprint -SummaryPath $summaryPath `
+            -Detail "This unit does not expose enough usable motherboard identifiers to verify the previous report."
     }
 
-    if ([string]$currentIdentity.Fingerprint -ieq $previousFingerprint) {
-        return New-IdentityState -Status "MATCH" -TrustedHistory $true -SystemName $systemName `
-            -CurrentIdentity $currentIdentity -PreviousFingerprint $previousFingerprint -SummaryPath $summaryPath `
-            -Detail "Current hardware fingerprint matches the previous report for this computer name."
+    if ([string]$CurrentIdentity.Fingerprint -ieq $previousFingerprint) {
+        return New-IdentityState -Status "MATCH" -TrustedHistory $true -UnitSerial $serial `
+            -CurrentIdentity $CurrentIdentity -PreviousFingerprint $previousFingerprint -SummaryPath $summaryPath `
+            -Detail "Motherboard matches the previous report for unit '$serial'."
     }
 
-    return New-IdentityState -Status "MISMATCH" -TrustedHistory $false -SystemName $systemName `
-        -CurrentIdentity $currentIdentity -PreviousFingerprint $previousFingerprint -SummaryPath $summaryPath `
-        -Detail "The current Windows computer name has previous test history, but that history belongs to different physical hardware."
+    return New-IdentityState -Status "MISMATCH" -TrustedHistory $false -UnitSerial $serial `
+        -CurrentIdentity $CurrentIdentity -PreviousFingerprint $previousFingerprint -SummaryPath $summaryPath `
+        -Detail "Unit '$serial' has previous test history recorded on a different motherboard."
 }
 
 function Get-HardwareIdentityFieldsFromSummary {
@@ -213,17 +225,17 @@ function Get-HardwareChangeDetails {
 
 function Save-HardwareChangeApproval {
     param(
-        [string]$SystemName,
+        [string]$UnitSerial,
         [string]$Reason,
         [string]$ApprovedByMode,
         $IdentityState
     )
 
-    $folder = Join-Path $script:ReportDir $SystemName
+    $folder = Join-Path $script:ReportDir $UnitSerial
     New-Item -ItemType Directory -Path $folder -Force | Out-Null
 
     $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-    $path = Join-Path $folder "${SystemName}_Hardware_Change_Approval_${timestamp}.txt"
+    $path = Join-Path $folder "${UnitSerial}_Hardware_Change_Approval_${timestamp}.txt"
 
     $old = Get-HardwareIdentityFieldsFromSummary -Path $IdentityState.SummaryPath
     $current = $IdentityState.CurrentIdentity
@@ -232,7 +244,7 @@ function Save-HardwareChangeApproval {
         "HARDWARE CHANGE APPROVAL"
         "========================"
         "Date/Time            : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-        "System Name          : $SystemName"
+        "Unit Serial          : $UnitSerial"
         "Approved In Mode     : $ApprovedByMode"
         "Change Reason        : $Reason"
         ""
@@ -282,7 +294,7 @@ function Test-HardwareChangeApprovalForCurrentIdentity {
         return $false
     }
 
-    $folder = Join-Path $script:ReportDir ([string]$IdentityState.SystemName)
+    $folder = Join-Path $script:ReportDir ([string]$IdentityState.UnitSerial)
 
     if (-not (Test-Path $folder)) {
         return $false

@@ -158,10 +158,10 @@ Test-Case "Approval only trusts the CURRENT HARDWARE fingerprint" {
     $root = New-TestRoot
     try {
         $state = [pscustomobject]@{
-            Status = "MISMATCH"; SystemName = "UNIT1"; SummaryPath = ""
+            Status = "MISMATCH"; UnitSerial = "UNIT1"; SummaryPath = ""
             CurrentIdentity = [pscustomobject]@{ Fingerprint = "NEWFP"; SystemUUID = "N"; BiosSerial = "N"; BaseboardSerial = "N" }
         }
-        $path = Save-HardwareChangeApproval -SystemName "UNIT1" -Reason "NIC swap" -ApprovedByMode "Engineer" -IdentityState $state
+        $path = Save-HardwareChangeApproval -UnitSerial "UNIT1" -Reason "NIC swap" -ApprovedByMode "Engineer" -IdentityState $state
         # Put a "previous" fingerprint in the file the way a real approval has one.
         (Get-Content $path) -replace '^(Fingerprint\s*:\s*)$', '${1}OLDFP' | Set-Content $path
 
@@ -170,6 +170,34 @@ Test-Case "Approval only trusts the CURRENT HARDWARE fingerprint" {
 
         $state.CurrentIdentity.Fingerprint = "OLDFP"
         Assert-True (-not (Test-HardwareChangeApprovalForCurrentIdentity -IdentityState $state)) "original hardware must not be auto-approved"
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Identity history is looked up by Unit Serial, not computer name (shared boot drive)" {
+    $root = New-TestRoot
+    try {
+        # SN100 was validated on board A.
+        $boardA = New-HardwareIdentity -SystemUUID "AAAA-1111" -BiosSerial "BIOSA" -BaseboardSerial "BOARDA"
+        $boardB = New-HardwareIdentity -SystemUUID "BBBB-2222" -BiosSerial "BIOSB" -BaseboardSerial "BOARDB"
+        $snapA = New-TestSnapshot
+        $snapA.System.HardwareFingerprint = $boardA.Fingerprint
+        $rename = New-RenameInfo "SN100" "SN100" $true $false "x"
+        [void](Save-Summary -SerialNumber "SN100" -TestPhase "Tier" -AppMode "Production" `
+            -Config (New-ConfigFromSnapshot -Snapshot $snapA -Name "c") -Snapshot $snapA -RenameInfo $rename -Results @())
+
+        # The shared drive (still named SN100) moves to unit SN101 on board B.
+        $next = Get-UnitIdentityState -UnitSerial "SN101" -CurrentIdentity $boardB
+        Assert-Equal "NEW" $next.Status "a new unit on a shared drive is not a hardware change"
+        Assert-Equal "SN101" $next.UnitSerial
+
+        # SN100 itself, back on board A: trusted history.
+        Assert-Equal "MATCH" (Get-UnitIdentityState -UnitSerial "SN100" -CurrentIdentity $boardA).Status
+
+        # SN100 with a replaced motherboard: still detected.
+        $swapped = Get-UnitIdentityState -UnitSerial "SN100" -CurrentIdentity $boardB
+        Assert-Equal "MISMATCH" $swapped.Status
+        Assert-True (-not $swapped.TrustedHistory)
     }
     finally { Remove-TestRoot $root }
 }

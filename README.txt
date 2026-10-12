@@ -1,4 +1,4 @@
-WINDOWS HARDWARE VALIDATOR GUI - V17
+WINDOWS HARDWARE VALIDATOR GUI - V18
 ====================================
 
 Runs on Windows PowerShell 5.1, which is built into Windows 10/11. Nothing
@@ -34,10 +34,25 @@ Validation refuses to continue when a config has been modified outside the
 validator after Engineer Mode registered it. Capturing or saving in the
 config editor registers the new contents.
 
+UNIT HISTORY AND SHARED BOOT DRIVES
+-----------------------------------
+Test history is kept per Unit Serial (Reports\<UnitSerial>\), and the
+validator looks it up by the serial the operator types, not by the Windows
+computer name. A shared test drive that moves from unit to unit still
+carries the previous unit's computer name; that name is simply renamed
+(with the usual confirmation) and is not treated as a hardware change.
+
+Until a serial is typed, the identity status uses the computer name as a
+guess. After the operator leaves the Serial Number box, the status and the
+auto-selected Config update for that serial.
+
 HARDWARE REPLACEMENT
 --------------------
-Production and Engineer modes may approve legitimate hardware replacement
-after reviewing the changed hardware IDs and entering a reason.
+If a Unit Serial's latest report was recorded on a different motherboard,
+the validator asks whether the motherboard was replaced (default No).
+Production and Engineer modes may approve it after entering a reason; the
+approval is saved in that unit's report folder. Choosing No stops
+validation so a mistyped serial can be corrected.
 
 CONFIG EDITOR (Engineer Mode)
 -----------------------------
@@ -135,6 +150,13 @@ run on a test station.
 
 CHANGE HISTORY
 ==============
+
+V18 - SHARED BOOT DRIVE FIX
+    - Unit history and hardware-change checks use the typed Unit Serial
+      instead of the Windows computer name. Previously, moving a shared
+      test drive to the next unit looked like a motherboard replacement:
+      validation either stopped or saved a false approval under the
+      previous unit's serial.
 
 V17 - REVIEW FIXES
     - The computer is renamed only after validation passes.

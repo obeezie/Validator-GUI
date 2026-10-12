@@ -106,7 +106,7 @@ $cmbPhase.SelectedIndex = -1
 $form.Controls.Add($cmbPhase)
 
 $lblSystemName = New-Object System.Windows.Forms.Label
-$lblSystemName.Text = "Current System: $env:COMPUTERNAME"
+$lblSystemName.Text = "Computer Name: $env:COMPUTERNAME"
 $lblSystemName.Location = New-Object System.Drawing.Point(510,90)
 $lblSystemName.Size = New-Object System.Drawing.Size(460,24)
 $lblSystemName.Font = New-Object System.Drawing.Font("Segoe UI",9,[System.Drawing.FontStyle]::Bold)
@@ -197,6 +197,17 @@ $btnRefresh.Add_Click({
 })
 
 $btnValidate.Add_Click({ Invoke-SystemValidation })
+
+# Once the operator has typed the Unit Serial, show that unit's identity
+# status and pick its previous Config (the computer name may be stale).
+$txtSerial.Add_Leave({
+    try {
+        Update-IdentityStatusAndAutoSelectConfig -PreserveCurrentSelection
+    }
+    catch {
+        Write-ErrorLog $_
+    }
+})
 
 $btnCapture.Add_Click({
     try {

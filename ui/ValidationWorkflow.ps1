@@ -37,13 +37,22 @@ function Update-IdentityStatusAndAutoSelectConfig {
         $script:cmbConfig.SelectedIndex = -1
     }
 
+    # History belongs to the Unit Serial. Until the operator has typed one,
+    # the computer name is only a guess: on a shared Boot Drive it is the
+    # previous unit's name.
+    $unitSerial = $script:txtSerial.Text.Trim()
+    $serialIsGuess = $null -ne (Test-SerialNumberFormat -SerialNumber $unitSerial)
+    if ($serialIsGuess) {
+        $unitSerial = ([string]$env:COMPUTERNAME).Trim()
+    }
+
     try {
-        $script:IdentityState = Get-CurrentSystemIdentityState
+        $script:IdentityState = Get-UnitIdentityState -UnitSerial $unitSerial -CurrentIdentity (Get-HardwareIdentity)
     }
     catch {
         Write-ErrorLog $_
         $script:IdentityState = New-IdentityState -Status "ERROR" -TrustedHistory $false `
-            -SystemName ([string]$env:COMPUTERNAME).Trim() -CurrentIdentity $null `
+            -UnitSerial $unitSerial -CurrentIdentity $null `
             -PreviousFingerprint "" -SummaryPath "" -Detail $_.Exception.Message
     }
 
@@ -51,7 +60,15 @@ function Update-IdentityStatusAndAutoSelectConfig {
 
     switch ($script:IdentityState.Status) {
         "MATCH"      { $lbl.Text = "Hardware Identity: MATCH"; $lbl.ForeColor = [System.Drawing.Color]::DarkGreen }
-        "MISMATCH"   { $lbl.Text = "Hardware Identity: MISMATCH - stale hostname detected"; $lbl.ForeColor = [System.Drawing.Color]::DarkRed }
+        "MISMATCH"   {
+            if ($serialIsGuess) {
+                $lbl.Text = "Hardware Identity: enter Unit Serial (name is from another unit)"
+                $lbl.ForeColor = [System.Drawing.Color]::DarkOrange
+            } else {
+                $lbl.Text = "Hardware Identity: MISMATCH - motherboard differs from history"
+                $lbl.ForeColor = [System.Drawing.Color]::DarkRed
+            }
+        }
         "UNVERIFIED" { $lbl.Text = "Hardware Identity: UNVERIFIED"; $lbl.ForeColor = [System.Drawing.Color]::DarkOrange }
         "NEW"        { $lbl.Text = "Hardware Identity: NEW / no previous history"; $lbl.ForeColor = [System.Drawing.Color]::DarkBlue }
         default      { $lbl.Text = "Hardware Identity: ERROR"; $lbl.ForeColor = [System.Drawing.Color]::DarkRed }
@@ -67,7 +84,7 @@ function Update-IdentityStatusAndAutoSelectConfig {
     }
 
     # Previous configuration is trusted only when the physical hardware
-    # fingerprint matches the report history for this Windows computer name.
+    # fingerprint matches the report history for this Unit Serial.
     if (-not $script:IdentityState.TrustedHistory) {
         return
     }
@@ -126,10 +143,13 @@ function Request-HardwareChangeApproval {
         "The stored and current hardware fingerprints differ."
     }
 
-    $approve = Confirm-Message -Icon Warning -Title "Review Hardware Change" -Text (
-        "Physical hardware mismatch detected.`n`n$changeText`n`n" +
-        "If hardware was intentionally replaced during troubleshooting or repair, choose Yes to accept the current hardware as the new baseline. " +
-        "Choose No if this may be the wrong system or a transferred boot drive."
+    $unitSerial = [string]$script:IdentityState.UnitSerial
+
+    $approve = Confirm-Message -Icon Warning -Title "Review Hardware Change" -DefaultNo -Text (
+        "Unit '$unitSerial' was previously tested on a different motherboard.`n`n$changeText`n`n" +
+        "If this unit's motherboard was replaced during troubleshooting or repair, choose Yes to record the hardware change " +
+        "and accept the current motherboard as its new baseline.`n`n" +
+        "Choose No if the serial number may be mistyped or this is a different unit."
     )
 
     if (-not $approve) {
@@ -146,7 +166,7 @@ function Request-HardwareChangeApproval {
     }
 
     $approvalPath = Save-HardwareChangeApproval `
-        -SystemName ([string]$script:IdentityState.SystemName) `
+        -UnitSerial $unitSerial `
         -Reason $reason.Trim() `
         -ApprovedByMode $script:AppMode `
         -IdentityState $script:IdentityState
@@ -233,6 +253,8 @@ function Invoke-SystemValidation {
 
         if ($script:IdentityState.Status -eq "MISMATCH" -and -not $hardwareChangeApproved) {
             if (-not (Request-HardwareChangeApproval)) {
+                $script:txtSerial.Focus()
+                $script:txtSerial.SelectAll()
                 return
             }
             $hardwareChangeApproved = $true
@@ -274,14 +296,13 @@ function Invoke-SystemValidation {
         $snapshot = Get-HardwareSnapshot
         $results = @(Test-SystemAgainstConfig -Config $config -Snapshot $snapshot)
 
-        $historyIdentity = ([string]$env:COMPUTERNAME).Trim()
 
         if ($hardwareChangeApproved) {
             $macHistoryResult = New-CheckResult "MAC HISTORY" "Previous summary comparison" "INFO" `
                 "Intentional hardware replacement was approved. Previous MAC addresses were not used as the baseline for the replacement hardware."
         }
         elseif ($script:IdentityState.TrustedHistory) {
-            $macHistoryResult = Compare-MacsToLatestSummary -SerialNumber $historyIdentity -Snapshot $snapshot
+            $macHistoryResult = Compare-MacsToLatestSummary -SerialNumber $serial -Snapshot $snapshot
         }
         else {
             $macHistoryResult = New-CheckResult "MAC HISTORY" "Previous summary comparison" "INFO" `
