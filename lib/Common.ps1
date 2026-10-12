@@ -7,13 +7,11 @@ function Initialize-ValidatorPaths {
     $script:ScriptRoot = $Root
     $script:ConfigDir = Join-Path $Root "Configs"
     $script:ReportDir = Join-Path $Root "Reports"
-    $script:BurnInTestConfigDir = Join-Path $Root "BurnInTestConfigs"
     $script:ConfigManifestName = "config_manifest.json"
     $script:ConfigManifestPath = Join-Path $script:ConfigDir $script:ConfigManifestName
-    $script:BurnInTestManifestPath = Join-Path $script:BurnInTestConfigDir "bitcfg_manifest.json"
     $script:ErrorLog = Join-Path $Root "HardwareValidator_Error.log"
 
-    foreach ($dir in @($script:ConfigDir, $script:ReportDir, $script:BurnInTestConfigDir)) {
+    foreach ($dir in @($script:ConfigDir, $script:ReportDir)) {
         if (-not (Test-Path $dir)) {
             New-Item -ItemType Directory -Path $dir | Out-Null
         }

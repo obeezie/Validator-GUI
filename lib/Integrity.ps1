@@ -1,6 +1,5 @@
-# SHA-256 manifests that protect engineer-registered files against
-# accidental edits. Both hardware configs and .bitcfg files use the same
-# manifest format: { "<file name>": "<SHA-256>" }.
+# SHA-256 manifest that protects engineer-registered hardware configs
+# against accidental edits. Format: { "<file name>": "<SHA-256>" }.
 
 function Get-FileSha256 {
     param([string]$Path)
@@ -100,19 +99,4 @@ function Register-ConfigIntegrity {
 function Test-ConfigIntegrity {
     param([string]$ConfigPath)
     return Test-FileIntegrity -ManifestPath $script:ConfigManifestPath -FilePath $ConfigPath -Label "Configuration"
-}
-
-function Register-BurnInTestConfigIntegrity {
-    param([string]$Path)
-    Register-FileIntegrity -ManifestPath $script:BurnInTestManifestPath -FilePath $Path
-}
-
-function Test-BurnInTestConfigIntegrity {
-    param([string]$Path)
-    return Test-FileIntegrity -ManifestPath $script:BurnInTestManifestPath -FilePath $Path -Label "BurnInTest configuration"
-}
-
-function Get-ExpectedBurnInTestConfigPath {
-    param([string]$ConfigBaseName)
-    return (Join-Path $script:BurnInTestConfigDir ($ConfigBaseName + ".bitcfg"))
 }

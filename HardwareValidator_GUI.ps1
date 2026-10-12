@@ -140,16 +140,9 @@ $btnOpenReport.Enabled = $false
 $form.Controls.Add($btnOpenReport)
 
 # Engineer-only row below the input fields.
-$btnOpenBIT = New-Object System.Windows.Forms.Button
-$btnOpenBIT.Text = "Open BIT Config Folder"
-$btnOpenBIT.Location = New-Object System.Drawing.Point(20,138)
-$btnOpenBIT.Size = New-Object System.Drawing.Size(220,34)
-$btnOpenBIT.Visible = ($AppMode -eq "Engineer")
-$form.Controls.Add($btnOpenBIT)
-
 $btnEditConfig = New-Object System.Windows.Forms.Button
 $btnEditConfig.Text = "Edit Selected Config"
-$btnEditConfig.Location = New-Object System.Drawing.Point(250,138)
+$btnEditConfig.Location = New-Object System.Drawing.Point(20,138)
 $btnEditConfig.Size = New-Object System.Drawing.Size(220,34)
 $btnEditConfig.Visible = ($AppMode -eq "Engineer")
 $form.Controls.Add($btnEditConfig)
@@ -231,18 +224,6 @@ $btnEditConfig.Add_Click({
 $btnOpenReport.Add_Click({
     if ($script:LastReportFolder -and (Test-Path $script:LastReportFolder)) {
         Start-Process explorer.exe -ArgumentList "`"$script:LastReportFolder`""
-    }
-})
-
-$btnOpenBIT.Add_Click({
-    try {
-        if (-not (Test-Path $BurnInTestConfigDir)) {
-            New-Item -ItemType Directory -Path $BurnInTestConfigDir -Force | Out-Null
-        }
-        Start-Process explorer.exe -ArgumentList "`"$BurnInTestConfigDir`""
-    }
-    catch {
-        Show-ErrorWithLog $_ "Unable to Open Folder"
     }
 })
 

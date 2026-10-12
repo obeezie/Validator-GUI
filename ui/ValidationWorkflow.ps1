@@ -234,25 +234,6 @@ function Invoke-SystemValidation {
 
         $configBaseName = [string]$script:cmbConfig.SelectedItem
         $configPath = Get-ConfigPath $configBaseName
-        $bitConfigPath = Get-ExpectedBurnInTestConfigPath -ConfigBaseName $configBaseName
-        $bitIntegrity = Test-BurnInTestConfigIntegrity -Path $bitConfigPath
-
-        if (-not $bitIntegrity.Exists) {
-            Show-Message -Icon Error -Title "BurnInTest Config Missing" -Text (
-                "The selected hardware configuration does not have a matching BurnInTest configuration.`n`n" +
-                "Expected:`n$bitConfigPath`n`nValidation cannot continue until Engineer mode provides the required .bitcfg file."
-            )
-            return
-        }
-
-        if (-not $bitIntegrity.Valid) {
-            Show-Message -Icon Error -Title "BurnInTest Config Integrity Failure" -Text (
-                "$($bitIntegrity.Detail)`n`nExpected file:`n$bitConfigPath`n`n" +
-                "Open Engineer mode and re-link or re-register the intended BurnInTest configuration."
-            )
-            return
-        }
-
         $integrity = Test-ConfigIntegrity -ConfigPath $configPath
         if (-not $integrity.Valid) {
             Show-Message -Icon Error -Title "Configuration Integrity Failure" -Text (
@@ -321,7 +302,6 @@ function Invoke-SystemValidation {
             -SerialNumber $serial `
             -TestPhase $testPhase `
             -AppMode $script:AppMode `
-            -ConfigBaseName $configBaseName `
             -Config $config `
             -Snapshot $snapshot `
             -RenameInfo $renameInfo `

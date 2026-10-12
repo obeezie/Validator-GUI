@@ -147,7 +147,6 @@ function Save-Summary {
         [string]$SerialNumber,
         [string]$TestPhase,
         [string]$AppMode,
-        [string]$ConfigBaseName,
         $Config,
         $Snapshot,
         $RenameInfo,
@@ -173,7 +172,6 @@ function Save-Summary {
     $lines.Add("Test Phase     : $TestPhase")
     $lines.Add("Application Mode : $AppMode")
     $lines.Add("Configuration  : $([string]$Config.Name)")
-    $lines.Add("BurnInTest Config : $ConfigBaseName.bitcfg")
     $lines.Add("Hardware Fingerprint : $([string]$Snapshot.System.HardwareFingerprint)")
     $lines.Add("System UUID          : $([string]$Snapshot.System.SystemUUID)")
     $lines.Add("BIOS Serial          : $([string]$Snapshot.System.BiosSerial)")

@@ -216,19 +216,6 @@ Test-Case "Save, integrity check, read back" {
     finally { Remove-TestRoot $root }
 }
 
-Test-Case "BurnInTest integrity: missing, unregistered, valid" {
-    $root = New-TestRoot
-    try {
-        $bit = Get-ExpectedBurnInTestConfigPath "test"
-        Assert-True (-not (Test-BurnInTestConfigIntegrity $bit).Exists)
-        Set-Content -Path $bit -Value "BITCFG"
-        Assert-True (-not (Test-BurnInTestConfigIntegrity $bit).Valid)
-        Register-BurnInTestConfigIntegrity $bit
-        Assert-True (Test-BurnInTestConfigIntegrity $bit).Valid
-    }
-    finally { Remove-TestRoot $root }
-}
-
 Test-Case "Editor data: blank rows skipped, numbers parsed, errors reported" {
     $general = @{ Name = "t"; Manufacturer = "HP"; Model = "M"; CpuModelContains = "AMD"; MinimumCores = 4; MinimumLogicalCPUs = 8; MinimumTotalGB = 15.2; ExpectedDIMMs = 2 }
     $ok = ConvertFrom-ConfigEditorData -General $general `
@@ -345,13 +332,13 @@ Test-Case "Summary round trip: fingerprint, config name, MAC history" {
         $snap = New-TestSnapshot
         $config = New-ConfigFromSnapshot -Snapshot $snap -Name "My Config"
         $rename = New-RenameInfo "UNIT1" "UNIT1" $true $false "Computer name already matches serial number."
-        $path = Save-Summary -SerialNumber "UNIT1" -TestPhase "Pre-Oven" -AppMode "Production" -ConfigBaseName "My Config" `
+        $path = Save-Summary -SerialNumber "UNIT1" -TestPhase "Pre-Oven" -AppMode "Production" `
             -Config $config -Snapshot $snap -RenameInfo $rename -Results @(New-CheckResult "CPU" "Model" "PASS" "x")
 
         Assert-True ($path -like "*UNIT1_Pre-Oven_*_Hardware_Validation_Summary.txt")
         Assert-Equal "ABC" (Get-HardwareFingerprintFromSummary -Path $path)
         Assert-Equal "My Config" (Get-ConfigurationNameFromSummary -Path $path)
-        Assert-True ((Get-Content $path) -contains "BurnInTest Config : My Config.bitcfg")
+        Assert-True (-not ((Get-Content $path) -match 'BurnInTest|bitcfg'))
         Assert-Equal "PASS" (Compare-MacsToLatestSummary -SerialNumber "UNIT1" -Snapshot $snap).Status
 
         $snap.Network.Adapters[1].MacAddress = "AA-AA-AA-AA-AA-AA"
