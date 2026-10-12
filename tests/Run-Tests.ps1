@@ -126,6 +126,23 @@ Test-Case "Rename only needed when serial differs from computer name" {
     Assert-Equal "Rename" (Get-RenameAction -SerialNumber "DEV3" -CurrentName "DEV2" -PendingName $null)
 }
 
+Test-Case "Name matches serial but a different rename is pending: conflict" {
+    Assert-Equal "Conflict" (Get-RenameAction -SerialNumber "DEV2" -CurrentName "DEV2" -PendingName "OTHER")
+    Assert-Equal "Rename" (Get-RenameAction -SerialNumber "DEV3" -CurrentName "DEV2" -PendingName "OTHER")
+}
+
+Test-Case "Computer is renamed only when validation passed" {
+    Assert-Equal "Rename" (Get-RenameActionAfterValidation -Action "Rename" -ChecksPassed $true)
+    Assert-Equal "Skip" (Get-RenameActionAfterValidation -Action "Rename" -ChecksPassed $false)
+    Assert-Equal "None" (Get-RenameActionAfterValidation -Action "None" -ChecksPassed $false)
+    Assert-Equal "Pending" (Get-RenameActionAfterValidation -Action "Pending" -ChecksPassed $false)
+
+    $skipped = Rename-SystemToSerial -SerialNumber "DEV3" -Action "Skip"
+    Assert-True ($skipped.RenameSucceeded) "a skipped rename is not a rename error"
+    Assert-True (-not $skipped.RebootRequired)
+    Assert-Equal "FAIL" (Get-OverallResult -Results @([pscustomobject]@{ Status = "FAIL" }) -RenameInfo $skipped)
+}
+
 Write-Host "Identity"
 
 Test-Case "Fingerprint ignores placeholder IDs" {
@@ -234,6 +251,12 @@ Test-Case "Editor data: blank rows skipped, numbers parsed, errors reported" {
         -GpuRows @()
     Assert-Equal $null $bad.Config
     Assert-True (@($bad.Errors).Count -ge 3) (@($bad.Errors) -join "; ")
+}
+
+Test-Case "Editor note flags wireless rows whose minimum is ignored" {
+    Assert-Equal "" (Get-NetworkAdapterEditorNote -AdapterContains "Intel(R) Ethernet I219-LM" -MinimumLinkMbps "1000")
+    Assert-Equal "Wireless: minimum ignored, not checked" (Get-NetworkAdapterEditorNote -AdapterContains "Realtek RTL8852BE-VS WiFi 6 802.11ax PCIe Adapter" -MinimumLinkMbps "72.2")
+    Assert-Equal "Wireless: link speed not checked" (Get-NetworkAdapterEditorNote -AdapterContains "Intel(R) Wi-Fi 6E AX211" -MinimumLinkMbps "")
 }
 
 Write-Host "Validation"

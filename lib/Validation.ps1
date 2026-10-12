@@ -215,15 +215,18 @@ function Test-SystemAgainstConfig {
     return @($results)
 }
 
+function Test-ChecksPassed {
+    param($Results)
+    return (@(@($Results) | Where-Object { $_.Status -eq "FAIL" }).Count -eq 0)
+}
+
 function Get-OverallResult {
     param(
         $Results,
         $RenameInfo
     )
 
-    $failures = @(@($Results) | Where-Object { $_.Status -eq "FAIL" })
-
-    if ($failures.Count -eq 0 -and [bool]$RenameInfo.RenameSucceeded) {
+    if ((Test-ChecksPassed -Results $Results) -and [bool]$RenameInfo.RenameSucceeded) {
         return "PASS"
     }
     return "FAIL"

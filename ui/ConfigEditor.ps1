@@ -55,7 +55,8 @@ function New-EditorNumber {
     return $num
 }
 
-# Columns: array of @{ Name; Header; Type = "Text" | "Check"; Width; Default }
+# Columns: array of @{ Name; Header; Type = "Text" | "Check" | "Note"; Width; Default }
+# "Note" columns are read-only, informational text that is not saved.
 function New-EditorGrid {
     param([object[]]$Columns)
 
@@ -75,6 +76,10 @@ function New-EditorGrid {
             $defaults[$c.Name] = [bool]$c.Default
         } else {
             $col = New-Object System.Windows.Forms.DataGridViewTextBoxColumn
+            if ($c.Type -eq "Note") {
+                $col.ReadOnly = $true
+                $col.DefaultCellStyle.ForeColor = [System.Drawing.Color]::DimGray
+            }
         }
 
         $col.Name = $c.Name
@@ -236,11 +241,27 @@ function Show-ConfigEditor {
         @{ Name = "AdapterContains"; Header = "Adapter description contains"; Type = "Text"; Width = 0 },
         @{ Name = "Required"; Header = "Required"; Type = "Check"; Width = 80; Default = $true },
         @{ Name = "RequireUp"; Header = "Link must be Up"; Type = "Check"; Width = 110; Default = $false },
-        @{ Name = "MinimumLinkMbps"; Header = "Min link Mbps (blank = none)"; Type = "Text"; Width = 170 }
+        @{ Name = "MinimumLinkMbps"; Header = "Min link Mbps (blank = none)"; Type = "Text"; Width = 170 },
+        @{ Name = "Note"; Header = "Note"; Type = "Note"; Width = 230 }
     )
     foreach ($a in @($config.Network.Adapters)) {
-        Add-EditorGridRow $gridNetwork @([string]$a.AdapterContains, [bool]$a.Required, [bool]$a.RequireUp, (Format-EditorNumber $a.MinimumLinkMbps))
+        Add-EditorGridRow $gridNetwork @(
+            [string]$a.AdapterContains, [bool]$a.Required, [bool]$a.RequireUp,
+            (Format-EditorNumber $a.MinimumLinkMbps),
+            (Get-NetworkAdapterEditorNote -AdapterContains ([string]$a.AdapterContains) -MinimumLinkMbps ([string](Format-EditorNumber $a.MinimumLinkMbps)))
+        )
     }
+    # Keep the note in step with what the engineer types.
+    $gridNetwork.Add_CellValueChanged({
+        param($sender, $e)
+        if ($e.RowIndex -lt 0) { return }
+        $colName = $sender.Columns[$e.ColumnIndex].Name
+        if ($colName -ne "AdapterContains" -and $colName -ne "MinimumLinkMbps") { return }
+        $row = $sender.Rows[$e.RowIndex]
+        $row.Cells["Note"].Value = Get-NetworkAdapterEditorNote `
+            -AdapterContains ([string]$row.Cells["AdapterContains"].Value) `
+            -MinimumLinkMbps ([string]$row.Cells["MinimumLinkMbps"].Value)
+    })
     New-EditorGridTab $tabs "Network" $gridNetwork "$requiredHint Wireless adapters never enforce a minimum link speed."
 
     $gridGpu = New-EditorGrid @(

@@ -1,4 +1,4 @@
-WINDOWS HARDWARE VALIDATOR GUI - V16
+WINDOWS HARDWARE VALIDATOR GUI - V17
 ====================================
 
 Runs on Windows PowerShell 5.1, which is built into Windows 10/11. Nothing
@@ -72,17 +72,32 @@ WI-FI
 -----
 Wireless adapters never have a minimum link speed enforced. This also
 applies to older configs that captured a Wi-Fi link speed. Wired adapters
-still check their minimum link speed.
+still check their minimum link speed. The editor's Network tab shows a Note
+on rows that look wireless, including when an old minimum is being ignored.
+
+LOGICAL CPUS
+------------
+The minimum logical CPU count is checked (V15+). Captures store the full
+thread count, so a unit with Hyper-Threading/SMT disabled will FAIL. Set the
+minimum to 0 in the editor to stop checking it for a config.
 
 COMPUTER RENAME
 ---------------
 The rename prompt appears only when the entered serial number differs from
 the current computer name. It shows both names and asks the operator to
 confirm the serial; the default button is No. Choosing No stops validation
-so the serial can be corrected, before anything is renamed or a report is
-filed. If a rename to that serial is already pending a restart, no second
-prompt is shown. All-numeric serials are rejected because Windows does not
-allow all-numeric computer names.
+so the serial can be corrected, before any checks run or a report is filed.
+
+The computer is renamed only when every check PASSES. A failing unit keeps
+its current name (the report says the rename was skipped), but the report is
+still filed under the entered serial.
+
+If a rename to that serial is already pending a restart, no second prompt is
+shown. If the name already matches the serial but Windows has a rename to a
+DIFFERENT name pending, validation stops and asks for a restart first.
+
+All-numeric serials are rejected because Windows does not allow all-numeric
+computer names.
 
 PORTABLE FOLDER STRUCTURE
 -------------------------
@@ -120,6 +135,12 @@ run on a test station.
 
 CHANGE HISTORY
 ==============
+
+V17 - REVIEW FIXES
+    - The computer is renamed only after validation passes.
+    - Validation stops when the name matches the serial but a rename to a
+      different name is pending.
+    - Editor Network tab shows a Note for wireless rows.
 
 V16 - BURNINTEST PAIRING REMOVED
     The .bitcfg requirement is gone everywhere: capture no longer asks for

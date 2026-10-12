@@ -158,12 +158,23 @@ function Request-HardwareChangeApproval {
 # Decides whether the computer needs renaming to the serial and, if so,
 # makes the operator confirm the serial first (catches typos before the
 # computer is renamed and a report is filed under the wrong serial).
-# Returns "None", "Pending" or "Rename", or $null when the operator declined.
+# The rename itself happens only after validation passes.
+# Returns "None", "Pending" or "Rename", or $null when validation must stop
+# (operator declined, or a conflicting rename is pending).
 function Confirm-SystemRename {
     param([string]$SerialNumber)
 
     $currentName = [string]$env:COMPUTERNAME
-    $action = Get-RenameAction -SerialNumber $SerialNumber -CurrentName $currentName -PendingName (Get-PendingComputerName)
+    $pendingName = Get-PendingComputerName
+    $action = Get-RenameAction -SerialNumber $SerialNumber -CurrentName $currentName -PendingName $pendingName
+
+    if ($action -eq "Conflict") {
+        Show-Message -Icon Warning -Title "Pending Rename Conflict" -Text (
+            "This computer is named '$currentName', but Windows is set to rename it to '$pendingName' at the next restart.`n`n" +
+            "Restart the computer and validate again. If '$pendingName' is the correct serial number, enter that instead."
+        )
+        return $null
+    }
 
     if ($action -ne "Rename") {
         return $action
@@ -173,8 +184,8 @@ function Confirm-SystemRename {
         "The serial number you entered does not match this computer's current name.`n`n" +
         "    Current computer name:   $currentName`n" +
         "    Entered serial number:   $SerialNumber`n`n" +
-        "Continuing will rename this computer to '$SerialNumber' (takes effect after a restart) " +
-        "and file the validation report under that serial number.`n`n" +
+        "If validation passes, this computer will be renamed to '$SerialNumber' (takes effect after a restart). " +
+        "The validation report will be filed under that serial number either way.`n`n" +
         "Check the serial number carefully. Is '$SerialNumber' correct?"
     )
 
@@ -260,11 +271,10 @@ function Invoke-SystemValidation {
             return
         }
 
-        $renameInfo = Rename-SystemToSerial -SerialNumber $serial -Action $renameAction
         $snapshot = Get-HardwareSnapshot
         $results = @(Test-SystemAgainstConfig -Config $config -Snapshot $snapshot)
 
-        $historyIdentity = ([string]$renameInfo.PreviousName).Trim()
+        $historyIdentity = ([string]$env:COMPUTERNAME).Trim()
 
         if ($hardwareChangeApproved) {
             $macHistoryResult = New-CheckResult "MAC HISTORY" "Previous summary comparison" "INFO" `
@@ -287,6 +297,10 @@ function Invoke-SystemValidation {
         }
 
         $results = @($results) + @($identityResult) + @($macHistoryResult)
+
+        # Rename only after every check (including MAC history) has passed.
+        $finalRenameAction = Get-RenameActionAfterValidation -Action $renameAction -ChecksPassed (Test-ChecksPassed -Results $results)
+        $renameInfo = Rename-SystemToSerial -SerialNumber $serial -Action $finalRenameAction
 
         foreach ($r in $results) {
             Add-ResultRow $r

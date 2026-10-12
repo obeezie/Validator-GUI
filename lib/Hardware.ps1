@@ -139,9 +139,13 @@ function Get-PendingComputerName {
     }
 }
 
-# "None"    - computer name already matches the serial.
-# "Pending" - a rename to this serial is already waiting for a restart.
-# "Rename"  - the computer must be renamed (operator confirmation required).
+# Decided before validation runs:
+# "None"     - computer name already matches the serial, nothing pending.
+# "Pending"  - a rename to this serial is already waiting for a restart.
+# "Rename"   - the computer must be renamed (operator confirmation required).
+# "Conflict" - the name matches the serial, but a rename to a DIFFERENT name
+#              is waiting for a restart. Validation must stop: the report
+#              would say the name matches while Windows is about to change it.
 function Get-RenameAction {
     param(
         [string]$SerialNumber,
@@ -149,15 +153,32 @@ function Get-RenameAction {
         [string]$PendingName
     )
 
+    $hasPending = -not [string]::IsNullOrWhiteSpace($PendingName) -and $PendingName -ine $CurrentName
+
     if ($CurrentName -ieq $SerialNumber) {
+        if ($hasPending) { return "Conflict" }
         return "None"
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($PendingName) -and $PendingName -ieq $SerialNumber) {
+    if ($hasPending -and $PendingName -ieq $SerialNumber) {
         return "Pending"
     }
 
     return "Rename"
+}
+
+# The computer is renamed only when every check passed, so a failing unit
+# keeps its current name. Returns the action to carry out after validation.
+function Get-RenameActionAfterValidation {
+    param(
+        [string]$Action,
+        [bool]$ChecksPassed
+    )
+
+    if ($Action -eq "Rename" -and -not $ChecksPassed) {
+        return "Skip"
+    }
+    return $Action
 }
 
 function New-RenameInfo {
@@ -188,6 +209,10 @@ function Rename-SystemToSerial {
 
     if ($Action -eq "None") {
         return New-RenameInfo $current $SerialNumber $true $false "Computer name already matches serial number."
+    }
+
+    if ($Action -eq "Skip") {
+        return New-RenameInfo $current $SerialNumber $true $false "Rename to '$SerialNumber' skipped because validation failed."
     }
 
     if ($Action -eq "Pending") {

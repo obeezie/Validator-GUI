@@ -363,6 +363,25 @@ function Test-BlankEditorRow {
     return $true
 }
 
+# Explains, next to a network row in the editor, that a minimum link speed
+# will be ignored because the adapter looks wireless. Validation decides
+# wireless from the real adapter; the editor can only guess from the text.
+function Get-NetworkAdapterEditorNote {
+    param(
+        [string]$AdapterContains,
+        [string]$MinimumLinkMbps
+    )
+
+    if (-not (Test-WirelessAdapter -Description $AdapterContains)) {
+        return ""
+    }
+
+    if ([string]::IsNullOrWhiteSpace($MinimumLinkMbps)) {
+        return "Wireless: link speed not checked"
+    }
+    return "Wireless: minimum ignored, not checked"
+}
+
 # Checkbox cells for brand-new grid rows can be null/DBNull: treat as default.
 function ConvertTo-EditorBool {
     param($Value, [bool]$Default)
