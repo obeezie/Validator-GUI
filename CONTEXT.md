@@ -1,6 +1,6 @@
 # Hardware Validator
 
-Checks that a physical unit's hardware matches the build it is supposed to be, at each test phase of the burn-in process, and records the result against the unit's serial.
+Checks that a technician is testing the unit their System Traveler describes, and that its hardware matches the build it is supposed to be, at each test phase of the burn-in process. Results are recorded against the unit's serial.
 
 ## Units and identity
 
@@ -16,6 +16,14 @@ _Avoid_: Serial number (unqualified), computer name, hostname
 The manufacturer's serial number stored in the unit's firmware. It is usually different from the Unit Serial and is used only to recognize the physical hardware.
 _Avoid_: OEM serial, Unit Serial
 
+**System Traveler**:
+The paperwork that travels with a unit. It holds the unit's documented identity: its Unit Serial, the serial numbers of each board, and its Assigned MAC Addresses.
+_Avoid_: Traveler sheet, documentation, paperwork
+
+**Assigned MAC Address**:
+A MAC address the assembler programs onto a unit's network adapter with the adapter vendor's tool, and records on the System Traveler. It belongs to the unit, not to the board: replacing a board or adapter does not change it.
+_Avoid_: Burned-in MAC, hardware MAC
+
 **Boot Drive**:
 The Windows drive a unit is running during validation. Depending on the station, it is either the unit's own disk or a shared test drive moved from unit to unit.
 _Avoid_: Image, OS drive
@@ -25,11 +33,11 @@ A computer name that belongs to a different unit, carried over when a shared Boo
 _Avoid_: Stale hostname
 
 **Hardware Fingerprint**:
-The identity of a unit's physical motherboard, taken from its firmware IDs (system UUID, BIOS serial and baseboard serial). It tells a unit's own history apart from another unit's.
+The identity of a unit's physical motherboard, taken from its firmware IDs (system UUID, BIOS serial and baseboard serial). It confirms the technician is testing the same physical unit as that Unit Serial's earlier runs.
 _Avoid_: Hardware identity, hardware ID
 
 **Hardware Change**:
-An approved, recorded replacement of a unit's motherboard. The unit keeps its Unit Serial and test history; the new Hardware Fingerprint becomes its baseline.
+An approved, recorded replacement of a unit's motherboard. The unit keeps its Unit Serial, test history and Assigned MAC Addresses; the new Hardware Fingerprint becomes its Baseline.
 _Avoid_: Hardware swap, replacement
 
 ## Builds
