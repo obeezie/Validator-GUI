@@ -54,6 +54,22 @@ A disk, network adapter or GPU in a Config that may be absent. If it is installe
 One stage of the burn-in process at which a unit is validated: Tier, Pre-Oven, Oven, Post-Oven.
 _Avoid_: Stage, step
 
+**Validation Run**:
+One validation of a unit at a Test Phase, recorded in its Unit History whether it passed or failed.
+_Avoid_: Test, check, report (the report is the record of a run)
+
+**Run Number**:
+The position of a Validation Run in its unit's history: 1 for the first run of that Unit Serial, then 2, 3 and so on. It decides which run is latest, because a unit's clock cannot be trusted.
+_Avoid_: Timestamp order
+
+**Unit History**:
+Every Validation Run and Hardware Change recorded under one Unit Serial.
+_Avoid_: Reports folder, log
+
+**Baseline**:
+What a unit's next run is compared against. Its motherboard (Hardware Fingerprint) and Config come from its latest run of any result; its MAC addresses come from its latest passing run.
+_Avoid_: Previous summary, last report
+
 **Tier**:
 The intake grading phase, when a unit first arrives and is graded by condition.
 _Avoid_: Intake, grading (as phase names)
