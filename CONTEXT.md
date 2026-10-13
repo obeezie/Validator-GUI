@@ -74,8 +74,12 @@ _Avoid_: Timestamp order
 Every Validation Run and Hardware Change recorded under one Unit Serial.
 _Avoid_: Reports folder, log
 
+**Traveler Confirmation**:
+The operator's confirmation, asked once per unit, that the MAC addresses detected on the unit (wired, Wi-Fi and Bluetooth) match its System Traveler. Until a unit has one, its runs cannot be recorded; answering No stops the run without recording anything.
+_Avoid_: MAC approval, traveler check
+
 **Baseline**:
-What a unit's next run is compared against. Its motherboard (Hardware Fingerprint) and Config come from its latest run of any result; its MAC addresses come from its latest passing run.
+What a unit's next run is compared against. Its motherboard (Hardware Fingerprint) and Config come from its latest run of any result; its MAC addresses are the ones confirmed in its Traveler Confirmation, and every later run must have exactly that set.
 _Avoid_: Previous summary, last report
 
 **Tier**:
