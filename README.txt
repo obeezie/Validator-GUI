@@ -1,4 +1,4 @@
-WINDOWS HARDWARE VALIDATOR GUI - V19
+WINDOWS HARDWARE VALIDATOR GUI - V20
 ====================================
 
 Runs on Windows PowerShell 5.1, which is built into Windows 10/11. Nothing
@@ -167,6 +167,7 @@ HardwareValidator\
         ConfigModel.ps1           Config load/save/normalize/capture
         Validation.ps1            Compares hardware to a config
         UnitHistory.ps1           Runs, Run Numbers, Baseline, approvals
+        ValidationRun.ps1         One Validation Run: order, questions, outcome
     ui\                           WinForms windows
         Dialogs.ps1
         CaptureWorkflow.ps1
@@ -188,6 +189,15 @@ run on a test station.
 
 CHANGE HISTORY
 ==============
+
+V20 - VALIDATION RUN MOVED OUT OF THE WINDOW CODE
+    - The rules of a run (order of checks and questions, when to stop,
+      when to rename, what gets recorded) now live in
+      lib\ValidationRun.ps1 instead of the main window code.
+    - Operator questions and machine access (hardware reads, computer
+      name, pending rename, rename) are passed in, so whole runs are
+      covered by tests\Run-Tests.ps1 with scripted answers.
+    - No change in behaviour for operators.
 
 V19 - UNIT HISTORY AND SYSTEM TRAVELER CONFIRMATION
     - Run Numbers decide the latest run instead of file times.

@@ -8,7 +8,7 @@
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
-foreach ($name in @("Common","Integrity","Identity","Hardware","ConfigModel","Validation","UnitHistory")) {
+foreach ($name in @("Common","Integrity","Identity","Hardware","ConfigModel","Validation","UnitHistory","ValidationRun")) {
     . (Join-Path (Join-Path $repoRoot "lib") "$name.ps1")
 }
 
@@ -117,30 +117,6 @@ Test-Case "Serial number format rules" {
     Assert-True ($null -ne (Test-SerialNumberFormat "1234567"))
     Assert-True ($null -ne (Test-SerialNumberFormat "ABCDEFGHIJKLMNOP"))
     Assert-True ($null -ne (Test-SerialNumberFormat "AB_12"))
-}
-
-Test-Case "Rename only needed when serial differs from computer name" {
-    Assert-Equal "None" (Get-RenameAction -SerialNumber "dev2" -CurrentName "DEV2" -PendingName "DEV2")
-    Assert-Equal "Pending" (Get-RenameAction -SerialNumber "DEV3" -CurrentName "DEV2" -PendingName "dev3")
-    Assert-Equal "Rename" (Get-RenameAction -SerialNumber "DEV3" -CurrentName "DEV2" -PendingName "DEV2")
-    Assert-Equal "Rename" (Get-RenameAction -SerialNumber "DEV3" -CurrentName "DEV2" -PendingName $null)
-}
-
-Test-Case "Name matches serial but a different rename is pending: conflict" {
-    Assert-Equal "Conflict" (Get-RenameAction -SerialNumber "DEV2" -CurrentName "DEV2" -PendingName "OTHER")
-    Assert-Equal "Rename" (Get-RenameAction -SerialNumber "DEV3" -CurrentName "DEV2" -PendingName "OTHER")
-}
-
-Test-Case "Computer is renamed only when validation passed" {
-    Assert-Equal "Rename" (Get-RenameActionAfterValidation -Action "Rename" -ChecksPassed $true)
-    Assert-Equal "Skip" (Get-RenameActionAfterValidation -Action "Rename" -ChecksPassed $false)
-    Assert-Equal "None" (Get-RenameActionAfterValidation -Action "None" -ChecksPassed $false)
-    Assert-Equal "Pending" (Get-RenameActionAfterValidation -Action "Pending" -ChecksPassed $false)
-
-    $skipped = Rename-SystemToSerial -SerialNumber "DEV3" -Action "Skip"
-    Assert-True ($skipped.RenameSucceeded) "a skipped rename is not a rename error"
-    Assert-True (-not $skipped.RebootRequired)
-    Assert-Equal "FAIL" (Get-OverallResult -Results @([pscustomobject]@{ Status = "FAIL" }) -RenameInfo $skipped)
 }
 
 Write-Host "Identity"
@@ -537,6 +513,238 @@ Test-Case "Report keeps the fields older tools and people read" {
         Assert-True ($text -contains "Traveler Confirmation : Confirmed by operator in Production mode")
         Assert-True (@($text | Where-Object { $_ -like "MAC RECORD     : *" }).Count -ge 1)
         Assert-Equal "c" (Get-UnitHistory -UnitSerial "SN1").LatestRun.ConfigName
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Write-Host "Validation Run"
+
+# Fake machine: a unit on a given motherboard with given MAC addresses.
+function New-FakeMachine {
+    param($Board, [string[]]$Macs, [string]$Name, [string]$Pending = $null, [switch]$RenameFails)
+    $state = @{ Renamed = $null; Board = $Board; Macs = $Macs; Name = $Name; Pending = $Pending; RenameFails = [bool]$RenameFails }
+    return @{
+        State = $state
+        ReadIdentity = { return $state.Board }.GetNewClosure()
+        ReadSnapshot = { return (New-SnapshotOnBoard $state.Board $state.Macs) }.GetNewClosure()
+        ComputerName = { return $state.Name }.GetNewClosure()
+        PendingName = { if ($state.Pending) { return $state.Pending } return $state.Name }.GetNewClosure()
+        Rename = { param($NewName) if ($state.RenameFails) { throw "Access denied" } $state.Renamed = $NewName }.GetNewClosure()
+    }
+}
+
+# Fake operator: scripted answers, and a log of what was asked.
+function New-FakeOperator {
+    param([bool]$Traveler = $true, [string]$Reason = "Board replaced", [bool]$Rename = $true)
+    $state = @{ Asked = [System.Collections.Generic.List[string]]::new(); Traveler = $Traveler; Reason = $Reason; Rename = $Rename; TravelerMacs = @() }
+    return @{
+        State = $state
+        ConfirmTraveler = { param($UnitSerial, $Adapters) $state.Asked.Add("Traveler"); $state.TravelerMacs = @($Adapters | ForEach-Object { $_.Mac }); return $state.Traveler }.GetNewClosure()
+        ApproveHardwareChange = { param($UnitSerial, $Changes) $state.Asked.Add("HardwareChange"); if ($state.Reason) { return $state.Reason } return $null }.GetNewClosure()
+        ConfirmRename = { param($CurrentName, $UnitSerial) $state.Asked.Add("Rename"); return $state.Rename }.GetNewClosure()
+    }
+}
+
+function New-RunFixture {
+    $root = New-TestRoot
+    $config = New-ConfigFromSnapshot -Snapshot (New-SnapshotOnBoard $script:BoardA) -Name "cfg"
+    $config.Network.Adapters = @()
+    Save-HardwareConfig -Config $config -Path (Get-ConfigPath "cfg")
+    return $root
+}
+
+function Invoke-TestRun {
+    param([string]$Serial, $Machine, $Operator, [string]$Config = "cfg", [string]$Phase = "Tier")
+    return Invoke-ValidationRun -UnitSerial $Serial -TestPhase $Phase -ConfigBaseName $Config -AppMode "Production" `
+        -Operator $Operator -Machine $Machine
+}
+
+function Get-ReportFiles {
+    return @(Get-ChildItem -Path $script:ReportDir -Recurse -File -ErrorAction SilentlyContinue)
+}
+
+function Get-Row {
+    param($Outcome, [string]$Section)
+    return @($Outcome.Results | Where-Object { $_.Section -eq $Section })[0]
+}
+
+$script:Mac1 = @("00-11-22-33-44-55")
+
+Test-Case "First run: traveler answered No stops the run and records nothing" {
+    $root = New-RunFixture
+    try {
+        $machine = New-FakeMachine $script:BoardA $script:Mac1 "OLDNAME"
+        $operator = New-FakeOperator -Traveler $false
+        $outcome = Invoke-TestRun "SN100" $machine $operator
+        Assert-Equal "Stopped" $outcome.Status
+        Assert-Equal "Serial" $outcome.Focus
+        Assert-True ($null -ne $outcome.Message)
+        Assert-Equal "Traveler" ($operator.State.Asked -join ",")
+        Assert-Equal 0 (Get-ReportFiles).Count
+        Assert-Equal $null $machine.State.Renamed
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "First run: traveler shows the detected MACs; pass renames and records the confirmation" {
+    $root = New-RunFixture
+    try {
+        $machine = New-FakeMachine $script:BoardA $script:Mac1 "OLDNAME"
+        $operator = New-FakeOperator
+        $outcome = Invoke-TestRun "SN100" $machine $operator
+        Assert-Equal "Completed" $outcome.Status
+        Assert-Equal "PASS" $outcome.OverallResult
+        Assert-Equal "Traveler,Rename" ($operator.State.Asked -join ",")
+        Assert-Equal "00-11-22-33-44-55" ($operator.State.TravelerMacs -join ",")
+        Assert-Equal "SN100" $machine.State.Renamed
+        Assert-True $outcome.RenameInfo.RebootRequired
+        Assert-True (Get-UnitHistory -UnitSerial "SN100").TravelerConfirmed
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Next phase on the same unit asks nothing and checks MACs against the traveler" {
+    $root = New-RunFixture
+    try {
+        [void](Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA $script:Mac1 "SN100") (New-FakeOperator))
+        $operator = New-FakeOperator
+        $outcome = Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA $script:Mac1 "SN100") $operator -Phase "Pre-Oven"
+        Assert-Equal "PASS" $outcome.OverallResult
+        Assert-Equal 0 $operator.State.Asked.Count
+        Assert-Equal "PASS" (Get-Row $outcome "IDENTITY").Status
+        Assert-Equal "PASS" (Get-Row $outcome "MAC ADDRESSES").Status
+        Assert-True ((Get-Row $outcome "MAC ADDRESSES").Detail -like "*run 1*")
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Shared boot drive: the next unit is NEW, asked traveler and rename only" {
+    $root = New-RunFixture
+    try {
+        [void](Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA $script:Mac1 "SN100") (New-FakeOperator))
+        $machine = New-FakeMachine $script:BoardB @("00-11-22-33-44-66") "SN100"
+        $operator = New-FakeOperator
+        $outcome = Invoke-TestRun "SN101" $machine $operator
+        Assert-Equal "PASS" $outcome.OverallResult
+        Assert-Equal "Traveler,Rename" ($operator.State.Asked -join ",")
+        Assert-Equal "INFO" (Get-Row $outcome "IDENTITY").Status
+        Assert-Equal "SN101" $machine.State.Renamed
+        Assert-Equal 0 @(Get-ChildItem (Join-Path $script:ReportDir "SN100") -Filter "*Approval*").Count
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Board swap approved, then rename declined: nothing written" {
+    $root = New-RunFixture
+    try {
+        [void](Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA $script:Mac1 "SN100") (New-FakeOperator))
+        $before = (Get-ReportFiles).Count
+        $operator = New-FakeOperator -Rename $false
+        $outcome = Invoke-TestRun "SN100" (New-FakeMachine $script:BoardB $script:Mac1 "OTHER") $operator
+        Assert-Equal "Stopped" $outcome.Status
+        Assert-Equal "HardwareChange,Rename" ($operator.State.Asked -join ",")
+        Assert-Equal $before (Get-ReportFiles).Count
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Board swap declined stops at the serial box" {
+    $root = New-RunFixture
+    try {
+        [void](Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA $script:Mac1 "SN100") (New-FakeOperator))
+        $outcome = Invoke-TestRun "SN100" (New-FakeMachine $script:BoardB $script:Mac1 "SN100") (New-FakeOperator -Reason "")
+        Assert-Equal "Stopped" $outcome.Status
+        Assert-Equal "Serial" $outcome.Focus
+        Assert-Equal 1 (Get-ReportFiles).Count
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Board swap approved: approval recorded, MACs still checked, next run just MATCHes" {
+    $root = New-RunFixture
+    try {
+        [void](Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA $script:Mac1 "SN100") (New-FakeOperator))
+        $outcome = Invoke-TestRun "SN100" (New-FakeMachine $script:BoardB @("AA-AA-AA-AA-AA-AA") "SN100") (New-FakeOperator)
+        Assert-Equal "PASS" (Get-Row $outcome "IDENTITY").Status
+        Assert-True ((Get-Row $outcome "IDENTITY").Detail -like "*approved*")
+        Assert-Equal "FAIL" (Get-Row $outcome "MAC ADDRESSES").Status
+        Assert-Equal 1 @(Get-ChildItem (Join-Path $script:ReportDir "SN100") -Filter "*Approval*").Count
+
+        $operator = New-FakeOperator
+        $next = Invoke-TestRun "SN100" (New-FakeMachine $script:BoardB $script:Mac1 "SN100") $operator
+        Assert-Equal 0 $operator.State.Asked.Count
+        Assert-True ((Get-Row $next "IDENTITY").Detail -like "*matches*")
+        Assert-Equal "PASS" $next.OverallResult "the failed run did not move the MAC baseline"
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "A failing unit is not renamed" {
+    $root = New-RunFixture
+    try {
+        $machine = New-FakeMachine $script:BoardA $script:Mac1 "OLDNAME"
+        $config = Read-HardwareConfig (Get-ConfigPath "cfg")
+        $config.Memory.ExpectedDIMMs = 4
+        Save-HardwareConfig -Config $config -Path (Get-ConfigPath "cfg")
+
+        $outcome = Invoke-TestRun "SN100" $machine (New-FakeOperator)
+        Assert-Equal "FAIL" $outcome.OverallResult
+        Assert-Equal $null $machine.State.Renamed
+        Assert-True ($outcome.RenameInfo.Detail -like "*skipped*")
+        Assert-True (-not $outcome.RenameInfo.RebootRequired)
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Rename failure fails the run and is reported" {
+    $root = New-RunFixture
+    try {
+        $outcome = Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA $script:Mac1 "OLDNAME" -RenameFails) (New-FakeOperator)
+        Assert-Equal "FAIL" $outcome.OverallResult
+        Assert-True (-not $outcome.RenameInfo.RenameSucceeded)
+        Assert-True ($outcome.RenameInfo.Detail -like "*Access denied*")
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Rename already pending to this serial: no prompt, restart still required" {
+    $root = New-RunFixture
+    try {
+        $machine = New-FakeMachine $script:BoardA $script:Mac1 "OLDNAME" -Pending "SN100"
+        $operator = New-FakeOperator
+        $outcome = Invoke-TestRun "SN100" $machine $operator
+        Assert-Equal "Traveler" ($operator.State.Asked -join ",")
+        Assert-Equal $null $machine.State.Renamed
+        Assert-True $outcome.RenameInfo.RebootRequired
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Automatic refusals come before any question and write nothing" {
+    $root = New-RunFixture
+    try {
+        $cases = @(
+            @{ Serial = "12345"; Phase = "Tier"; Config = "cfg"; Machine = (New-FakeMachine $script:BoardA $script:Mac1 "OLDNAME"); Focus = "Serial" },
+            @{ Serial = "SN100"; Phase = ""; Config = "cfg"; Machine = (New-FakeMachine $script:BoardA $script:Mac1 "OLDNAME"); Focus = "Phase" },
+            @{ Serial = "SN100"; Phase = "Tier"; Config = ""; Machine = (New-FakeMachine $script:BoardA $script:Mac1 "OLDNAME"); Focus = "Config" },
+            @{ Serial = "SN100"; Phase = "Tier"; Config = "cfg"; Machine = (New-FakeMachine $script:BoardA $script:Mac1 "SN100" -Pending "OTHER"); Focus = "Serial" }
+        )
+        foreach ($c in $cases) {
+            $operator = New-FakeOperator
+            $outcome = Invoke-TestRun $c.Serial $c.Machine $operator -Config $c.Config -Phase $c.Phase
+            Assert-Equal "Stopped" $outcome.Status "case $($c.Focus)"
+            Assert-Equal $c.Focus $outcome.Focus
+            Assert-Equal 0 $operator.State.Asked.Count
+        }
+
+        # A Config changed outside the validator.
+        Set-FileReadOnlyState -Path (Get-ConfigPath "cfg") -ReadOnly $false
+        Add-Content -Path (Get-ConfigPath "cfg") -Value " "
+        $operator = New-FakeOperator
+        $outcome = Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA $script:Mac1 "OLDNAME") $operator
+        Assert-Equal "Stopped" $outcome.Status
+        Assert-Equal 0 $operator.State.Asked.Count
+        Assert-Equal 0 (Get-ReportFiles).Count
     }
     finally { Remove-TestRoot $root }
 }

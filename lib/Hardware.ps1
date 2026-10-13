@@ -167,20 +167,6 @@ function Get-RenameAction {
     return "Rename"
 }
 
-# The computer is renamed only when every check passed, so a failing unit
-# keeps its current name. Returns the action to carry out after validation.
-function Get-RenameActionAfterValidation {
-    param(
-        [string]$Action,
-        [bool]$ChecksPassed
-    )
-
-    if ($Action -eq "Rename" -and -not $ChecksPassed) {
-        return "Skip"
-    }
-    return $Action
-}
-
 function New-RenameInfo {
     param(
         [string]$PreviousName,
@@ -199,13 +185,16 @@ function New-RenameInfo {
     }
 }
 
+# Carries out the rename decision through the machine port. Action is one of
+# Get-RenameAction's values, or "Skip" when the run failed.
 function Rename-SystemToSerial {
     param(
         [string]$SerialNumber,
-        [string]$Action
+        [string]$Action,
+        $Machine
     )
 
-    $current = [string]$env:COMPUTERNAME
+    $current = [string](& $Machine.ComputerName)
 
     if ($Action -eq "None") {
         return New-RenameInfo $current $SerialNumber $true $false "Computer name already matches serial number."
@@ -220,10 +209,22 @@ function Rename-SystemToSerial {
     }
 
     try {
-        Rename-Computer -NewName $SerialNumber -Force -ErrorAction Stop
+        & $Machine.Rename $SerialNumber
         return New-RenameInfo $current $SerialNumber $true $true "Rename requested successfully. Reboot required."
     }
     catch {
         return New-RenameInfo $current $SerialNumber $false $false ([string]$_.Exception.Message)
+    }
+}
+
+# The machine port for a real Windows unit. Tests pass a fake with the same
+# keys: ReadIdentity, ReadSnapshot, ComputerName, PendingName, Rename.
+function New-WindowsMachine {
+    return @{
+        ReadIdentity = { Get-HardwareIdentity }
+        ReadSnapshot = { Get-HardwareSnapshot }
+        ComputerName = { [string]$env:COMPUTERNAME }
+        PendingName = { Get-PendingComputerName }
+        Rename = { param($NewName) Rename-Computer -NewName $NewName -Force -ErrorAction Stop }
     }
 }
