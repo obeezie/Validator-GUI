@@ -1,4 +1,4 @@
-WINDOWS HARDWARE VALIDATOR GUI - V18
+WINDOWS HARDWARE VALIDATOR GUI - V19
 ====================================
 
 Runs on Windows PowerShell 5.1, which is built into Windows 10/11. Nothing
@@ -36,23 +36,61 @@ config editor registers the new contents.
 
 UNIT HISTORY AND SHARED BOOT DRIVES
 -----------------------------------
-Test history is kept per Unit Serial (Reports\<UnitSerial>\), and the
-validator looks it up by the serial the operator types, not by the Windows
-computer name. A shared test drive that moves from unit to unit still
-carries the previous unit's computer name; that name is simply renamed
-(with the usual confirmation) and is not treated as a hardware change.
+Each unit's Validation Runs are kept per Unit Serial (Reports\<UnitSerial>\),
+looked up by the serial the operator types, not by the Windows computer
+name. A shared test drive that moves from unit to unit still carries the
+previous unit's computer name; that name is simply renamed (with the usual
+confirmation) and is not treated as a hardware change.
 
 Until a serial is typed, the identity status uses the computer name as a
 guess. After the operator leaves the Serial Number box, the status and the
 auto-selected Config update for that serial.
 
+RUN NUMBERS
+-----------
+Every run gets the next Run Number for its Unit Serial, shown in the report
+("Run Number : 3") and the file name:
+
+    <UnitSerial>_Run003_<Phase>_<yyyyMMdd_HHmmss>_Hardware_Validation_Summary.txt
+
+"Latest run" means the highest Run Number, because a unit's clock can be
+wrong (for example after a motherboard swap). Reports from before Run
+Numbers count as earlier runs, ordered by the timestamp in their file name.
+
+SYSTEM TRAVELER CONFIRMATION
+----------------------------
+The first time a Unit Serial is validated (and once for units that only
+have older reports), the validator lists every detected MAC address (wired,
+Wi-Fi and Bluetooth) and asks whether they match the unit's System Traveler.
+The default answer is No.
+
+    No  - validation stops and nothing is recorded. Check that the unit,
+          its serial label and the traveler belong together, and that the
+          MAC addresses were programmed.
+    Yes - the confirmation is saved in that run's report and those MAC
+          addresses become the unit's baseline.
+
+Both Production and Engineer modes can confirm.
+
+MAC ADDRESS CHECK
+-----------------
+Every later run must have exactly the confirmed set of MAC addresses (the
+adapter model may differ; the addresses may not). Any difference FAILS the
+run and is listed as Missing / Unexpected. A failed run never changes the
+baseline. MAC addresses are checked after a motherboard replacement too,
+because assigned MAC addresses do not change with the board.
+
+Note: Windows only shows a Bluetooth MAC address when the Bluetooth network
+adapter ("Bluetooth Device (Personal Area Network)") is present.
+
 HARDWARE REPLACEMENT
 --------------------
-If a Unit Serial's latest report was recorded on a different motherboard,
-the validator asks whether the motherboard was replaced (default No).
-Production and Engineer modes may approve it after entering a reason; the
-approval is saved in that unit's report folder. Choosing No stops
-validation so a mistyped serial can be corrected.
+If a unit's latest run was recorded on a different motherboard, the
+validator asks whether the motherboard was replaced (default No).
+Production and Engineer modes may approve it after entering a reason.
+Choosing No stops validation so a mistyped serial can be corrected.
+The approval is saved in that unit's report folder only when the run
+completes; a run stopped at any question leaves no files behind.
 
 CONFIG EDITOR (Engineer Mode)
 -----------------------------
@@ -128,7 +166,7 @@ HardwareValidator\
         Hardware.ps1              Hardware snapshot and computer rename
         ConfigModel.ps1           Config load/save/normalize/capture
         Validation.ps1            Compares hardware to a config
-        Reports.ps1               Summary reports and history
+        UnitHistory.ps1           Runs, Run Numbers, Baseline, approvals
     ui\                           WinForms windows
         Dialogs.ps1
         CaptureWorkflow.ps1
@@ -150,6 +188,18 @@ run on a test station.
 
 CHANGE HISTORY
 ==============
+
+V19 - UNIT HISTORY AND SYSTEM TRAVELER CONFIRMATION
+    - Run Numbers decide the latest run instead of file times.
+    - One-time System Traveler confirmation of MAC addresses per unit;
+      later runs must match it exactly. Failed runs no longer become the
+      MAC baseline.
+    - MAC addresses are compared by address only, and are checked after a
+      motherboard replacement.
+    - Questions come after all automatic checks, and nothing is written
+      until the run completes (no stray approval files).
+    - Report reading/writing consolidated in lib\UnitHistory.ps1
+      (replaces lib\Reports.ps1).
 
 V18 - SHARED BOOT DRIVE FIX
     - Unit history and hardware-change checks use the typed Unit Serial

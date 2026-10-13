@@ -24,7 +24,7 @@ $sourceFiles = @(
     "lib\Hardware.ps1",
     "lib\ConfigModel.ps1",
     "lib\Validation.ps1",
-    "lib\Reports.ps1",
+    "lib\UnitHistory.ps1",
     "ui\Dialogs.ps1",
     "ui\CaptureWorkflow.ps1",
     "ui\ConfigEditor.ps1",
@@ -186,6 +186,7 @@ $grpMac.Controls.Add($txtMacs)
 
 $script:LastReportFolder = $null
 $script:IdentityState = $null
+$script:UnitHistory = $null
 
 # ---------------------------------------------------------------------------
 # Button wiring

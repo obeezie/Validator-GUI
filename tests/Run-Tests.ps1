@@ -8,7 +8,7 @@
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
-foreach ($name in @("Common","Integrity","Identity","Hardware","ConfigModel","Validation","Reports")) {
+foreach ($name in @("Common","Integrity","Identity","Hardware","ConfigModel","Validation","UnitHistory")) {
     . (Join-Path (Join-Path $repoRoot "lib") "$name.ps1")
 }
 
@@ -152,54 +152,6 @@ Test-Case "Fingerprint ignores placeholder IDs" {
     Assert-Equal $a.Fingerprint $b.Fingerprint
     $none = New-HardwareIdentity -SystemUUID "00000000-0000-0000-0000-000000000000" -BiosSerial "" -BaseboardSerial "N/A"
     Assert-Equal "" $none.Fingerprint
-}
-
-Test-Case "Approval only trusts the CURRENT HARDWARE fingerprint" {
-    $root = New-TestRoot
-    try {
-        $state = [pscustomobject]@{
-            Status = "MISMATCH"; UnitSerial = "UNIT1"; SummaryPath = ""
-            CurrentIdentity = [pscustomobject]@{ Fingerprint = "NEWFP"; SystemUUID = "N"; BiosSerial = "N"; BaseboardSerial = "N" }
-        }
-        $path = Save-HardwareChangeApproval -UnitSerial "UNIT1" -Reason "NIC swap" -ApprovedByMode "Engineer" -IdentityState $state
-        # Put a "previous" fingerprint in the file the way a real approval has one.
-        (Get-Content $path) -replace '^(Fingerprint\s*:\s*)$', '${1}OLDFP' | Set-Content $path
-
-        Assert-Equal "NEWFP" ((Get-ApprovedFingerprintsFromApproval -Path $path) -join ",")
-        Assert-True (Test-HardwareChangeApprovalForCurrentIdentity -IdentityState $state)
-
-        $state.CurrentIdentity.Fingerprint = "OLDFP"
-        Assert-True (-not (Test-HardwareChangeApprovalForCurrentIdentity -IdentityState $state)) "original hardware must not be auto-approved"
-    }
-    finally { Remove-TestRoot $root }
-}
-
-Test-Case "Identity history is looked up by Unit Serial, not computer name (shared boot drive)" {
-    $root = New-TestRoot
-    try {
-        # SN100 was validated on board A.
-        $boardA = New-HardwareIdentity -SystemUUID "AAAA-1111" -BiosSerial "BIOSA" -BaseboardSerial "BOARDA"
-        $boardB = New-HardwareIdentity -SystemUUID "BBBB-2222" -BiosSerial "BIOSB" -BaseboardSerial "BOARDB"
-        $snapA = New-TestSnapshot
-        $snapA.System.HardwareFingerprint = $boardA.Fingerprint
-        $rename = New-RenameInfo "SN100" "SN100" $true $false "x"
-        [void](Save-Summary -SerialNumber "SN100" -TestPhase "Tier" -AppMode "Production" `
-            -Config (New-ConfigFromSnapshot -Snapshot $snapA -Name "c") -Snapshot $snapA -RenameInfo $rename -Results @())
-
-        # The shared drive (still named SN100) moves to unit SN101 on board B.
-        $next = Get-UnitIdentityState -UnitSerial "SN101" -CurrentIdentity $boardB
-        Assert-Equal "NEW" $next.Status "a new unit on a shared drive is not a hardware change"
-        Assert-Equal "SN101" $next.UnitSerial
-
-        # SN100 itself, back on board A: trusted history.
-        Assert-Equal "MATCH" (Get-UnitIdentityState -UnitSerial "SN100" -CurrentIdentity $boardA).Status
-
-        # SN100 with a replaced motherboard: still detected.
-        $swapped = Get-UnitIdentityState -UnitSerial "SN100" -CurrentIdentity $boardB
-        Assert-Equal "MISMATCH" $swapped.Status
-        Assert-True (-not $swapped.TrustedHistory)
-    }
-    finally { Remove-TestRoot $root }
 }
 
 Write-Host "Config model"
@@ -375,25 +327,216 @@ Test-Case "Overall result" {
     Assert-Equal "FAIL" (Get-OverallResult -Results ($pass + [pscustomobject]@{ Status = "FAIL" }) -RenameInfo $ok)
 }
 
-Write-Host "Reports"
+Write-Host "Unit History"
 
-Test-Case "Summary round trip: fingerprint, config name, MAC history" {
+# Records one Validation Run for a unit through the real writer.
+function Save-TestRun {
+    param(
+        [string]$Serial,
+        $Snapshot,
+        [string]$Result = "PASS",
+        [bool]$Confirmed = $false,
+        [datetime]$Now = (Get-Date),
+        [string]$Phase = "Tier"
+    )
+    $history = Get-UnitHistory -UnitSerial $Serial
+    $rename = New-RenameInfo $Serial $Serial $true $false "Computer name already matches serial number."
+    return Save-ValidationRun -History $history -TestPhase $Phase -AppMode "Production" `
+        -Config (New-ConfigFromSnapshot -Snapshot $Snapshot -Name "c") -Snapshot $Snapshot -RenameInfo $rename `
+        -Results @(New-CheckResult "CPU" "Model" $Result "x") -TravelerConfirmed $Confirmed -Now $Now
+}
+
+# Writes a report the way versions before Run Numbers did.
+function Write-LegacyReport {
+    param([string]$Serial, [string]$Stamp, [string]$Fingerprint, [string]$Mac, [string]$Result = "PASS")
+    $folder = Join-Path $script:ReportDir $Serial
+    New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    $path = Join-Path $folder "${Serial}_Tier_${Stamp}_Hardware_Validation_Summary.txt"
+    @(
+        "Serial Number  : $Serial",
+        "Configuration  : legacy",
+        "Hardware Fingerprint : $Fingerprint",
+        "Overall Result : $Result",
+        "MAC RECORD     : Intel NIC|$Mac"
+    ) | Set-Content -Path $path
+    return $path
+}
+
+function New-SnapshotOnBoard {
+    param($Board, [string[]]$Macs)
+    $snap = New-TestSnapshot
+    $snap.System.HardwareFingerprint = $Board.Fingerprint
+    $snap.System.SystemUUID = $Board.SystemUUID
+    $snap.System.BiosSerial = $Board.BiosSerial
+    $snap.System.BaseboardSerial = $Board.BaseboardSerial
+    if ($Macs) {
+        $snap.Network.Adapters = @($Macs | ForEach-Object {
+            [pscustomobject]@{ Name = "n"; InterfaceDescription = "Adapter $_"; Status = "Up"; MacAddress = $_; LinkSpeed = "1 Gbps"; LinkSpeedMbps = 1000; IsWireless = $false }
+        })
+    }
+    return $snap
+}
+
+$script:BoardA = New-HardwareIdentity -SystemUUID "AAAA-1111" -BiosSerial "BIOSA" -BaseboardSerial "BOARDA"
+$script:BoardB = New-HardwareIdentity -SystemUUID "BBBB-2222" -BiosSerial "BIOSB" -BaseboardSerial "BOARDB"
+
+Test-Case "A unit with no reports is NEW and starts at Run 1" {
     $root = New-TestRoot
     try {
-        $snap = New-TestSnapshot
-        $config = New-ConfigFromSnapshot -Snapshot $snap -Name "My Config"
-        $rename = New-RenameInfo "UNIT1" "UNIT1" $true $false "Computer name already matches serial number."
-        $path = Save-Summary -SerialNumber "UNIT1" -TestPhase "Pre-Oven" -AppMode "Production" `
-            -Config $config -Snapshot $snap -RenameInfo $rename -Results @(New-CheckResult "CPU" "Model" "PASS" "x")
+        $history = Get-UnitHistory -UnitSerial "SN1"
+        Assert-Equal 1 $history.NextRunNumber
+        Assert-Equal $null $history.LatestRun
+        Assert-True (-not $history.TravelerConfirmed)
+        Assert-Equal "NEW" (Get-UnitIdentityState -History $history -CurrentIdentity $script:BoardA).Status
+    }
+    finally { Remove-TestRoot $root }
+}
 
-        Assert-True ($path -like "*UNIT1_Pre-Oven_*_Hardware_Validation_Summary.txt")
-        Assert-Equal "ABC" (Get-HardwareFingerprintFromSummary -Path $path)
-        Assert-Equal "My Config" (Get-ConfigurationNameFromSummary -Path $path)
-        Assert-True (-not ((Get-Content $path) -match 'BurnInTest|bitcfg'))
-        Assert-Equal "PASS" (Compare-MacsToLatestSummary -SerialNumber "UNIT1" -Snapshot $snap).Status
+Test-Case "Runs are numbered per Unit Serial and the number is in the file name and report" {
+    $root = New-TestRoot
+    try {
+        $snap = New-SnapshotOnBoard $script:BoardA
+        $first = Save-TestRun -Serial "SN1" -Snapshot $snap
+        $second = Save-TestRun -Serial "SN1" -Snapshot $snap -Phase "Pre-Oven"
+        Assert-True ((Split-Path -Leaf $first) -like "SN1_Run001_Tier_*_Hardware_Validation_Summary.txt") (Split-Path -Leaf $first)
+        Assert-True ((Split-Path -Leaf $second) -like "SN1_Run002_Pre-Oven_*") (Split-Path -Leaf $second)
+        Assert-True ((Get-Content $second) -contains "Run Number     : 2")
+        $history = Get-UnitHistory -UnitSerial "SN1"
+        Assert-Equal 2 $history.LatestRun.RunNumber
+        Assert-Equal 3 $history.NextRunNumber
+        Assert-Equal 1 @(Get-UnitHistory -UnitSerial "SN2").NextRunNumber
+    }
+    finally { Remove-TestRoot $root }
+}
 
-        $snap.Network.Adapters[1].MacAddress = "AA-AA-AA-AA-AA-AA"
-        Assert-Equal "FAIL" (Compare-MacsToLatestSummary -SerialNumber "UNIT1" -Snapshot $snap).Status
+Test-Case "Latest run is decided by Run Number, not by the unit's clock" {
+    $root = New-TestRoot
+    try {
+        [void](Save-TestRun -Serial "SN1" -Snapshot (New-SnapshotOnBoard $script:BoardA) -Now ([datetime]"2026-10-01"))
+        # Board swap reset the clock to 2000: the report's timestamp and the
+        # file time both come from that clock.
+        $second = Save-TestRun -Serial "SN1" -Snapshot (New-SnapshotOnBoard $script:BoardB) -Now ([datetime]"2000-01-01")
+        (Get-Item $second).LastWriteTime = [datetime]"2000-01-01"
+        $history = Get-UnitHistory -UnitSerial "SN1"
+        Assert-Equal 2 $history.LatestRun.RunNumber
+        Assert-Equal $script:BoardB.Fingerprint $history.LatestRun.Fingerprint
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Legacy reports are ordered by file-name timestamp and come before numbered runs" {
+    $root = New-TestRoot
+    try {
+        $newer = Write-LegacyReport "SN1" "20261005_120000" "FPNEW" "00-00-00-00-00-02"
+        $older = Write-LegacyReport "SN1" "20261001_120000" "FPOLD" "00-00-00-00-00-01"
+        # File times say the opposite (e.g. copied between USB drives).
+        (Get-Item $newer).LastWriteTime = [datetime]"2020-01-01"
+        $history = Get-UnitHistory -UnitSerial "SN1"
+        Assert-Equal "FPNEW" $history.LatestRun.Fingerprint
+        Assert-Equal 3 $history.NextRunNumber "two legacy runs, so the next run is 3"
+
+        [void](Save-TestRun -Serial "SN1" -Snapshot (New-SnapshotOnBoard $script:BoardA) -Now ([datetime]"2000-01-01"))
+        Assert-Equal $script:BoardA.Fingerprint (Get-UnitHistory -UnitSerial "SN1").LatestRun.Fingerprint
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Motherboard baseline comes from the latest run, even a failed one" {
+    $root = New-TestRoot
+    try {
+        [void](Save-TestRun -Serial "SN1" -Snapshot (New-SnapshotOnBoard $script:BoardA) -Result "PASS")
+        [void](Save-TestRun -Serial "SN1" -Snapshot (New-SnapshotOnBoard $script:BoardB) -Result "FAIL")
+        $history = Get-UnitHistory -UnitSerial "SN1"
+        Assert-Equal "FAIL" $history.LatestRun.OverallResult
+        Assert-Equal "MATCH" (Get-UnitIdentityState -History $history -CurrentIdentity $script:BoardB).Status
+        Assert-Equal "MISMATCH" (Get-UnitIdentityState -History $history -CurrentIdentity $script:BoardA).Status
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Shared boot drive: each Unit Serial has its own history" {
+    $root = New-TestRoot
+    try {
+        [void](Save-TestRun -Serial "SN100" -Snapshot (New-SnapshotOnBoard $script:BoardA))
+        $next = Get-UnitIdentityState -History (Get-UnitHistory -UnitSerial "SN101") -CurrentIdentity $script:BoardB
+        Assert-Equal "NEW" $next.Status
+        Assert-Equal "SN101" $next.UnitSerial
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Traveler Confirmation sets the MAC baseline; later failed runs do not move it" {
+    $root = New-TestRoot
+    try {
+        $macs = @("40-1A-58-83-6F-A0", "00-11-22-33-44-55")
+        [void](Save-TestRun -Serial "SN1" -Snapshot (New-SnapshotOnBoard $script:BoardA $macs) -Result "FAIL" -Confirmed $true)
+        # A later failed run on different MACs must not become the baseline.
+        [void](Save-TestRun -Serial "SN1" -Snapshot (New-SnapshotOnBoard $script:BoardA @("AA-AA-AA-AA-AA-AA")) -Result "FAIL")
+
+        $history = Get-UnitHistory -UnitSerial "SN1"
+        Assert-True $history.TravelerConfirmed
+        Assert-Equal 1 $history.ConfirmedRunNumber
+        Assert-Equal "PASS" (Compare-MacsToBaseline -History $history -Snapshot (New-SnapshotOnBoard $script:BoardA $macs)).Status
+
+        $wrong = Compare-MacsToBaseline -History $history -Snapshot (New-SnapshotOnBoard $script:BoardA @("40-1A-58-83-6F-A0", "AA-AA-AA-AA-AA-AA"))
+        Assert-Equal "FAIL" $wrong.Status
+        Assert-True ($wrong.Detail -like "*Missing: 00-11-22-33-44-55*") $wrong.Detail
+        Assert-True ($wrong.Detail -like "*Unexpected: AA-AA-AA-AA-AA-AA*") $wrong.Detail
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "MAC comparison ignores adapter model, case and separators" {
+    $root = New-TestRoot
+    try {
+        [void](Save-TestRun -Serial "SN1" -Snapshot (New-SnapshotOnBoard $script:BoardA @("40-1a-58-83-6f-a0")) -Confirmed $true)
+        $snap = New-SnapshotOnBoard $script:BoardA @("40:1A:58:83:6F:A0")
+        $snap.Network.Adapters[0].InterfaceDescription = "Replacement NIC, different model"
+        Assert-Equal "PASS" (Compare-MacsToBaseline -History (Get-UnitHistory -UnitSerial "SN1") -Snapshot $snap).Status
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Units with only older reports still need a Traveler Confirmation" {
+    $root = New-TestRoot
+    try {
+        [void](Write-LegacyReport "SN1" "20261001_120000" $script:BoardA.Fingerprint "00-00-00-00-00-01")
+        [void](Save-TestRun -Serial "SN1" -Snapshot (New-SnapshotOnBoard $script:BoardA))
+        Assert-True (-not (Get-UnitHistory -UnitSerial "SN1").TravelerConfirmed)
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Hardware Change: details, approval file, only the CURRENT board is approved" {
+    $root = New-TestRoot
+    try {
+        [void](Save-TestRun -Serial "SN1" -Snapshot (New-SnapshotOnBoard $script:BoardA))
+        $history = Get-UnitHistory -UnitSerial "SN1"
+
+        $details = @(Get-HardwareChangeDetails -History $history -CurrentIdentity $script:BoardB)
+        Assert-Equal 3 $details.Count ($details -join " / ")
+        Assert-True (-not (Test-HardwareChangeApproved -History $history -Fingerprint $script:BoardB.Fingerprint))
+
+        $path = Save-HardwareChangeApproval -History $history -CurrentIdentity $script:BoardB -Reason "Board replaced" -ApprovedByMode "Production"
+        Assert-True ($path -like "*SN1_Hardware_Change_Approval_*.txt")
+
+        $history = Get-UnitHistory -UnitSerial "SN1"
+        Assert-True (Test-HardwareChangeApproved -History $history -Fingerprint $script:BoardB.Fingerprint)
+        Assert-True (-not (Test-HardwareChangeApproved -History $history -Fingerprint $script:BoardA.Fingerprint)) "original board must not be auto-approved"
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Report keeps the fields older tools and people read" {
+    $root = New-TestRoot
+    try {
+        $path = Save-TestRun -Serial "SN1" -Snapshot (New-SnapshotOnBoard $script:BoardA) -Confirmed $true
+        $text = Get-Content $path
+        Assert-True ($text -contains "Serial Number  : SN1")
+        Assert-True ($text -contains "Overall Result : PASS")
+        Assert-True ($text -contains "Traveler Confirmation : Confirmed by operator in Production mode")
+        Assert-True (@($text | Where-Object { $_ -like "MAC RECORD     : *" }).Count -ge 1)
+        Assert-Equal "c" (Get-UnitHistory -UnitSerial "SN1").LatestRun.ConfigName
     }
     finally { Remove-TestRoot $root }
 }
