@@ -214,9 +214,13 @@ function Test-SystemAgainstConfig {
         }
     }
 
-    # Required Devices (Device Manager)
+    # Required Devices (Device Manager). Only presence is checked: installing
+    # drivers is the customer's responsibility, so a driver problem is not a
+    # failure. Windows also keeps entries for unplugged devices; those do not
+    # count as present.
     $expectedDevices = @(@($Config.Devices) | Where-Object { $null -ne $_ })
-    $deviceMatches = Find-ComponentMatches -Expected $expectedDevices -Actual @($Snapshot.Devices) -IsMatch {
+    $presentDevices = @(@($Snapshot.Devices) | Where-Object { $null -ne $_ -and -not (Test-DeviceNotPresent $_) })
+    $deviceMatches = Find-ComponentMatches -Expected $expectedDevices -Actual $presentDevices -IsMatch {
         param($exp, $act)
         $wanted = ([string]$exp.HardwareId).Trim()
         @(@($act.HardwareIds) | Where-Object { ([string]$_) -ieq $wanted }).Count -gt 0
@@ -235,12 +239,7 @@ function Test-SystemAgainstConfig {
             continue
         }
 
-        if ([int]$actual.ErrorCode -ne 0) {
-            $results.Add((New-CheckResult "DEVICES" $checkName "FAIL" `
-                "$([string]$actual.Name): Device Manager reports a problem (code $([int]$actual.ErrorCode): $(Get-DeviceProblemText ([int]$actual.ErrorCode)))"))
-        } else {
-            $results.Add((New-CheckResult "DEVICES" $checkName "PASS" "$([string]$actual.Name): present and working"))
-        }
+        $results.Add((New-CheckResult "DEVICES" $checkName "PASS" "$([string]$actual.Name): present in Device Manager"))
     }
 
     return @($results)
@@ -266,20 +265,11 @@ function Get-ConfiguredNetworkAdapters {
     return @(@(Find-NetworkAdapterMatches -Expected $expected -Snapshot $Snapshot) | Where-Object { $null -ne $_ })
 }
 
-# Device Manager problem codes (CM_PROB_*), as operators see them.
-function Get-DeviceProblemText {
-    param([int]$Code)
-
-    $texts = @{
-        1 = "not configured correctly"; 3 = "driver may be corrupted"; 10 = "cannot start"
-        12 = "not enough free resources"; 14 = "restart required"; 18 = "drivers need reinstalling"
-        19 = "registry configuration is damaged"; 21 = "being removed"; 22 = "disabled"
-        24 = "not present or not working properly"; 28 = "drivers are not installed"
-        31 = "not working properly"; 37 = "driver failed to initialize"; 39 = "driver is missing or corrupted"
-        43 = "stopped by Windows after reporting problems"; 45 = "not connected"; 52 = "driver signature cannot be verified"
-    }
-    if ($texts.ContainsKey($Code)) { return [string]$texts[$Code] }
-    return "see Device Manager"
+# Device Manager problem codes that mean the hardware is not actually there:
+# 24 (not present) and 45 (previously connected, not connected now).
+function Test-DeviceNotPresent {
+    param($Device)
+    return (@(24, 45) -contains [int]$Device.ErrorCode)
 }
 
 function Test-ChecksPassed {

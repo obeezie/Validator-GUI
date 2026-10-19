@@ -247,6 +247,7 @@ function Show-DevicePicker {
         $filter = $txtFilter.Text.Trim()
 
         foreach ($d in $allDevices) {
+            if (Test-DeviceNotPresent $d) { continue }
             if (-not $chkAll.Checked -and (Test-BuiltInDevice $d)) { continue }
             $suggested = [string](Select-DeviceHardwareId $d.HardwareIds)
             if ([string]::IsNullOrWhiteSpace($suggested)) { continue }

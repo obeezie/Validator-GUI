@@ -283,7 +283,7 @@ Test-Case "Optional network adapters and devices that are not installed get no r
     Assert-Equal 0 @(Get-ResultFor $results "DEVICES" "*").Count
 }
 
-Test-Case "Required Devices: present and working passes; missing or with a problem fails" {
+Test-Case "Required Devices: only presence counts, not driver state" {
     $snap = New-TestSnapshot
     $config = New-ConfigFromSnapshot -Snapshot $snap -Name "t"
     $config | Add-Member -NotePropertyName Devices -NotePropertyValue @(
@@ -296,10 +296,48 @@ Test-Case "Required Devices: present and working passes; missing or with a probl
     Assert-Equal "PASS,FAIL,FAIL" (($rows | ForEach-Object { $_.Status }) -join ",") "one physical shield cannot satisfy two entries"
     Assert-True ($rows[2].Detail -like "*not found*") $rows[2].Detail
 
-    $snap.Devices[0].ErrorCode = 22
-    $row = @(Get-ResultFor (Test-SystemAgainstConfig -Config $config -Snapshot $snap) "DEVICES" "Boot Shield")[0]
-    Assert-Equal "FAIL" $row.Status
-    Assert-True ($row.Detail -like "*code 22*disabled*") $row.Detail
+    # Missing drivers (28), disabled (22) or not started (10): still present.
+    foreach ($code in @(28, 22, 10)) {
+        $snap.Devices[0].ErrorCode = $code
+        $row = @(Get-ResultFor (Test-SystemAgainstConfig -Config $config -Snapshot $snap) "DEVICES" "Boot Shield")[0]
+        Assert-Equal "PASS" $row.Status "code $code"
+    }
+
+    # Windows keeps entries for unplugged devices (45 = not connected, 24 = not present).
+    foreach ($code in @(45, 24)) {
+        $snap.Devices[0].ErrorCode = $code
+        $row = @(Get-ResultFor (Test-SystemAgainstConfig -Config $config -Snapshot $snap) "DEVICES" "Boot Shield")[0]
+        Assert-Equal "FAIL" $row.Status "code $code"
+        Assert-True ($row.Detail -like "*not found*") $row.Detail
+    }
+}
+
+Test-Case "A device removed in the editor and saved is no longer checked" {
+    $root = New-TestRoot
+    try {
+        $general = @{ Name = "d"; Manufacturer = "HP"; Model = "HP Laptop 15-fc0xxx"; CpuModelContains = "AMD"; MinimumCores = 4; MinimumLogicalCPUs = 0; MinimumTotalGB = 8; ExpectedDIMMs = 2 }
+        $path = Get-ConfigPath "d"
+        $both = ConvertFrom-ConfigEditorData -General $general -StorageRows @() -NetworkRows @() -GpuRows @() -DeviceRows @(
+            @{ Name = "Boot Shield"; HardwareId = "USB\VID_1234&PID_0001"; Required = $true },
+            @{ Name = "TPM"; HardwareId = "ACPI\MSFT0101"; Required = $true })
+        Save-HardwareConfig -Config $both.Config -Path $path
+        Assert-Equal "FAIL" (@(Get-ResultFor (Test-SystemAgainstConfig -Config (Read-HardwareConfig $path) -Snapshot (New-TestSnapshot)) "DEVICES" "TPM")[0]).Status
+
+        # Remove the TPM row and save, as the editor does.
+        $config = Read-HardwareConfig $path
+        $rows = @($config.Devices | Where-Object { $_.Name -ne "TPM" } | ForEach-Object { @{ Name = $_.Name; HardwareId = $_.HardwareId; Required = $_.Required } })
+        Save-HardwareConfig -Config (ConvertFrom-ConfigEditorData -General $general -StorageRows @() -NetworkRows @() -GpuRows @() -DeviceRows $rows).Config -Path $path
+
+        Assert-True (Test-ConfigIntegrity -ConfigPath $path).Valid
+        $rowsAfter = @(Get-ResultFor (Test-SystemAgainstConfig -Config (Read-HardwareConfig $path) -Snapshot (New-TestSnapshot)) "DEVICES" "*")
+        Assert-Equal "Boot Shield" (($rowsAfter | ForEach-Object { $_.Check }) -join ",")
+        Assert-Equal "PASS" $rowsAfter[0].Status
+
+        # Removing the last device leaves no device checks at all.
+        Save-HardwareConfig -Config (ConvertFrom-ConfigEditorData -General $general -StorageRows @() -NetworkRows @() -GpuRows @() -DeviceRows @()).Config -Path $path
+        Assert-Equal 0 @(Get-ResultFor (Test-SystemAgainstConfig -Config (Read-HardwareConfig $path) -Snapshot (New-TestSnapshot)) "DEVICES" "*").Count
+    }
+    finally { Remove-TestRoot $root }
 }
 
 Test-Case "Only adapters the Config lists are reported" {

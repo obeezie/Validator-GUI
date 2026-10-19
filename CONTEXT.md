@@ -57,7 +57,7 @@ A disk, network adapter, GPU or Required Device in a Config that must be present
 A component in a Config that may be absent. If it is installed, it must still meet its spec. Rarely used, because a Config describes one exact build.
 
 **Required Device**:
-A device a test procedure expects to see in Device Manager (for example a boot shield), listed in a Config by its hardware ID. It must be present with no Device Manager problem for the unit to pass.
+A device a test procedure expects to see in Device Manager (for example a boot shield), listed in a Config by its hardware ID. It must be present for the unit to pass; its driver state is not checked, because installing drivers is the customer's responsibility.
 _Avoid_: PnP device, driver check
 
 ## Process

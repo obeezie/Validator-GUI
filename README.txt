@@ -1,4 +1,4 @@
-WINDOWS HARDWARE VALIDATOR GUI - V21
+WINDOWS HARDWARE VALIDATOR GUI - V22
 ====================================
 
 Runs on Windows PowerShell 5.1, which is built into Windows 10/11. Nothing
@@ -98,9 +98,12 @@ A Config can list devices a test procedure expects in Device Manager, such
 as a boot shield. Add them in Engineer Mode: Edit Selected Config, Devices
 tab, either "Add Device from This Unit..." (pick from what Device Manager
 shows; built-in system devices are hidden unless ticked) or by typing a
-hardware ID. Each listed device must be present with no Device Manager
-problem; otherwise the run FAILS with the problem code (for example code 22,
-disabled). Listing the same hardware ID twice requires two such devices.
+hardware ID. Each listed device must be present in Device Manager;
+otherwise the run FAILS. Only presence is checked: a missing or failed
+driver does not fail the run, because drivers are the customer's
+responsibility. Unplugged devices that Windows still remembers do not count
+as present. Listing the same hardware ID twice requires two such devices.
+Removing a device row in the editor and saving stops it being checked.
 Capture does not add devices.
 
 HARDWARE REPLACEMENT
@@ -210,6 +213,10 @@ run on a test station.
 
 CHANGE HISTORY
 ==============
+
+V22 - REQUIRED DEVICES: PRESENCE ONLY
+    - A Required Device passes when it is present in Device Manager,
+      whatever its driver state. Unplugged devices still fail.
 
 V21 - FIELD FIXES
     - Every Tier run re-confirms MAC addresses against the System

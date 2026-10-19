@@ -109,8 +109,9 @@ function Get-HardwareSnapshot {
     }
 }
 
-# Every device Device Manager shows on this unit (Win32_PnPEntity lists the
-# present devices). ErrorCode is Device Manager's problem code; 0 = working.
+# Every device Device Manager knows on this unit (Win32_PnPEntity).
+# ErrorCode is Device Manager's problem code: 0 = working, 28 = no driver,
+# 24/45 = not present (see Test-DeviceNotPresent).
 function Get-DeviceList {
     return @(
         Get-CimInstance Win32_PnPEntity |
