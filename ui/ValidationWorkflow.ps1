@@ -134,7 +134,7 @@ function Set-OverallLabel {
 function New-DialogOperator {
     return @{
         ConfirmTraveler = {
-            param($UnitSerial, $Adapters)
+            param($UnitSerial, $Adapters, $ReplacesRunNumber)
 
             $lines = [System.Collections.Generic.List[string]]::new()
             foreach ($a in @($Adapters)) {
@@ -145,8 +145,15 @@ function New-DialogOperator {
                 $lines.Add("  (no network adapters with a MAC address were detected)")
             }
 
+            $intro = if ($null -ne $ReplacesRunNumber) {
+                "Tier run: check unit '$UnitSerial' against its System Traveler again. " +
+                "Answering Yes replaces the MAC addresses confirmed in run $ReplacesRunNumber.`n`n"
+            } else {
+                "Unit '$UnitSerial' has not been checked against its System Traveler yet.`n`n"
+            }
+
             return Confirm-Message -Icon Question -Title "Traveler Confirmation" -DefaultNo -Text (
-                "Unit '$UnitSerial' has not been checked against its System Traveler yet.`n`n" +
+                $intro +
                 "Compare these MAC addresses with the System Traveler:`n`n" +
                 [string]::Join("`n", $lines) + "`n`n" +
                 "Is this the System Traveler for unit '$UnitSerial', and do ALL of these MAC addresses match it?"
@@ -243,7 +250,7 @@ function Invoke-SystemValidation {
     }
 
     $macLines = [System.Collections.Generic.List[string]]::new()
-    foreach ($a in @($outcome.Snapshot.Network.Adapters)) {
+    foreach ($a in @($outcome.Adapters)) {
         $macLines.Add("$([string]$a.InterfaceDescription) | $([string]$a.MacAddress) | $([string]$a.LinkSpeed) | $([string]$a.Status)")
     }
     $script:txtMacs.Text = [string]::Join([Environment]::NewLine, $macLines)

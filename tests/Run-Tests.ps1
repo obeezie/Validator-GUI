@@ -73,7 +73,16 @@ function New-TestSnapshot {
         GPU = [pscustomobject]@{ Adapters = @(
             [pscustomobject]@{ Name = "AMD Radeon(TM) Graphics"; DriverVersion = "1" }
         ) }
+        Devices = @(
+            (New-TestDevice "Boot Shield" @("USB\VID_1234&PID_0001&REV_0200", "USB\VID_1234&PID_0001")),
+            (New-TestDevice "Intel(R) Ethernet I219-LM" @("PCI\VEN_8086&DEV_15BB&SUBSYS_00001234&REV_10", "PCI\VEN_8086&DEV_15BB&SUBSYS_00001234", "PCI\VEN_8086&DEV_15BB"))
+        )
     }
+}
+
+function New-TestDevice {
+    param([string]$Name, [string[]]$HardwareIds, [int]$ErrorCode = 0, [string]$Class = "USB")
+    return [pscustomobject]@{ Name = $Name; Class = $Class; HardwareIds = $HardwareIds; InstanceId = ($HardwareIds[0] + "\1"); ErrorCode = $ErrorCode }
 }
 
 function Get-ResultFor {
@@ -215,7 +224,92 @@ Test-Case "Editor note flags wireless rows whose minimum is ignored" {
     Assert-Equal "Wireless: link speed not checked" (Get-NetworkAdapterEditorNote -AdapterContains "Intel(R) Wi-Fi 6E AX211" -MinimumLinkMbps "")
 }
 
+Test-Case "Required Devices: normalized, edited, and need a hardware ID" {
+    $raw = '{"Name":"d","System":{"Manufacturer":"HP","Model":"M"},"CPU":{"ModelContains":"AMD","MinimumCores":4},"Memory":{"MinimumTotalGB":8,"ExpectedDIMMs":1},"Devices":[{"Name":"Boot Shield","HardwareId":"USB\\VID_1234&PID_0001"}]}' | ConvertFrom-Json
+    $config = ConvertTo-NormalizedConfig $raw
+    Assert-Equal 1 @($config.Devices).Count
+    Assert-True ($config.Devices[0].Required) "devices default to Required"
+    Assert-Equal 0 @((ConvertTo-NormalizedConfig ('{"Name":"x"}' | ConvertFrom-Json)).Devices).Count "older configs have no devices"
+
+    $general = @{ Name = "t"; Manufacturer = "HP"; Model = "M"; CpuModelContains = "AMD"; MinimumCores = 4; MinimumLogicalCPUs = 0; MinimumTotalGB = 8; ExpectedDIMMs = 1 }
+    $ok = ConvertFrom-ConfigEditorData -General $general -StorageRows @() -NetworkRows @() -GpuRows @() `
+        -DeviceRows @(@{ Name = "Boot Shield"; HardwareId = " USB\VID_1234&PID_0001 "; Required = [System.DBNull]::Value }, @{ Name = ""; HardwareId = ""; Required = $true })
+    Assert-Equal 0 @($ok.Errors).Count (@($ok.Errors) -join "; ")
+    Assert-Equal 1 @($ok.Config.Devices).Count
+    Assert-Equal "USB\VID_1234&PID_0001" $ok.Config.Devices[0].HardwareId
+    Assert-True ($ok.Config.Devices[0].Required)
+
+    $bad = ConvertFrom-ConfigEditorData -General $general -StorageRows @() -NetworkRows @() -GpuRows @() `
+        -DeviceRows @(@{ Name = "Boot Shield"; HardwareId = ""; Required = $true })
+    Assert-True (@($bad.Errors) -match 'Device row 1').Count "missing hardware ID is an error"
+}
+
+Test-Case "Picking a device suggests a hardware ID without the revision" {
+    Assert-Equal "PCI\VEN_8086&DEV_15BB&SUBSYS_00001234" (Select-DeviceHardwareId @("PCI\VEN_8086&DEV_15BB&SUBSYS_00001234&REV_10", "PCI\VEN_8086&DEV_15BB&SUBSYS_00001234", "PCI\VEN_8086&DEV_15BB"))
+    Assert-Equal "ACPI\PNP0A08" (Select-DeviceHardwareId @("ACPI\PNP0A08"))
+}
+
 Write-Host "Validation"
+
+Test-Case "Adapter enumeration (#2, #3) does not affect matching" {
+    $snap = New-TestSnapshot
+    $snap.Network.Adapters = @(
+        [pscustomobject]@{ Name = "Ethernet 3"; InterfaceDescription = "Intel(R) I210 Gigabit Network Connection #3"; Status = "Up"; MacAddress = "00-00-00-00-00-01"; LinkSpeed = "1 Gbps"; LinkSpeedMbps = 1000; IsWireless = $false },
+        [pscustomobject]@{ Name = "Ethernet"; InterfaceDescription = "Intel(R) I210 Gigabit Network Connection"; Status = "Up"; MacAddress = "00-00-00-00-00-02"; LinkSpeed = "1 Gbps"; LinkSpeedMbps = 1000; IsWireless = $false }
+    )
+    $config = New-ConfigFromSnapshot -Snapshot (New-TestSnapshot) -Name "t"
+    $config.Network.Adapters = @(
+        [pscustomobject]@{ AdapterContains = "Intel(R) I210 Gigabit Network Connection #2"; Required = $true; MinimumLinkMbps = 1000; RequireUp = $true },
+        [pscustomobject]@{ AdapterContains = "Intel(R) I210 Gigabit Network Connection"; Required = $true; MinimumLinkMbps = 1000; RequireUp = $true }
+    )
+    $nics = @(Get-ResultFor (Test-SystemAgainstConfig -Config $config -Snapshot $snap) "NETWORK" "*")
+    Assert-Equal 2 $nics.Count
+    Assert-Equal "PASS,PASS" (($nics | ForEach-Object { $_.Status }) -join ",") (($nics | ForEach-Object { $_.Detail }) -join " / ")
+    Assert-Equal "Intel(R) I210 Gigabit Network Connection" $nics[0].Check "the #n suffix is not shown"
+
+    $captured = New-ConfigFromSnapshot -Snapshot $snap -Name "t"
+    Assert-Equal "Intel(R) I210 Gigabit Network Connection" $captured.Network.Adapters[0].AdapterContains "capture stores the description without #n"
+}
+
+Test-Case "Optional network adapters and devices that are not installed get no row" {
+    $snap = New-TestSnapshot
+    $config = New-ConfigFromSnapshot -Snapshot $snap -Name "t"
+    $config.Network.Adapters += [pscustomobject]@{ AdapterContains = "Bluetooth Device"; Required = $false; MinimumLinkMbps = $null; RequireUp = $false }
+    $config | Add-Member -NotePropertyName Devices -NotePropertyValue @(
+        [pscustomobject]@{ Name = "Smart card reader"; HardwareId = "USB\VID_9999&PID_0001"; Required = $false }
+    ) -Force
+    $results = Test-SystemAgainstConfig -Config $config -Snapshot $snap
+    Assert-Equal 0 @(Get-ResultFor $results "NETWORK" "Bluetooth*").Count
+    Assert-Equal 0 @(Get-ResultFor $results "DEVICES" "*").Count
+}
+
+Test-Case "Required Devices: present and working passes; missing or with a problem fails" {
+    $snap = New-TestSnapshot
+    $config = New-ConfigFromSnapshot -Snapshot $snap -Name "t"
+    $config | Add-Member -NotePropertyName Devices -NotePropertyValue @(
+        [pscustomobject]@{ Name = "Boot Shield"; HardwareId = "usb\vid_1234&pid_0001"; Required = $true },
+        [pscustomobject]@{ Name = "Second Boot Shield"; HardwareId = "USB\VID_1234&PID_0001"; Required = $true },
+        [pscustomobject]@{ Name = "TPM"; HardwareId = "ACPI\MSFT0101"; Required = $true }
+    ) -Force
+
+    $rows = @(Get-ResultFor (Test-SystemAgainstConfig -Config $config -Snapshot $snap) "DEVICES" "*")
+    Assert-Equal "PASS,FAIL,FAIL" (($rows | ForEach-Object { $_.Status }) -join ",") "one physical shield cannot satisfy two entries"
+    Assert-True ($rows[2].Detail -like "*not found*") $rows[2].Detail
+
+    $snap.Devices[0].ErrorCode = 22
+    $row = @(Get-ResultFor (Test-SystemAgainstConfig -Config $config -Snapshot $snap) "DEVICES" "Boot Shield")[0]
+    Assert-Equal "FAIL" $row.Status
+    Assert-True ($row.Detail -like "*code 22*disabled*") $row.Detail
+}
+
+Test-Case "Only adapters the Config lists are reported" {
+    $snap = New-TestSnapshot
+    $config = New-ConfigFromSnapshot -Snapshot $snap -Name "t"
+    $config.Network.Adapters = @($config.Network.Adapters | Where-Object { $_.AdapterContains -like "*Ethernet*" })
+    $listed = @(Get-ConfiguredNetworkAdapters -Config $config -Snapshot $snap)
+    Assert-Equal 1 $listed.Count
+    Assert-Equal "Intel(R) Ethernet I219-LM" $listed[0].InterfaceDescription
+}
 
 Test-Case "Captured config passes on the same hardware" {
     $snap = New-TestSnapshot
@@ -462,6 +556,39 @@ Test-Case "Traveler Confirmation sets the MAC baseline; later failed runs do not
     finally { Remove-TestRoot $root }
 }
 
+Test-Case "The latest Traveler Confirmation replaces the MAC baseline" {
+    $root = New-TestRoot
+    try {
+        [void](Save-TestRun -Serial "SN1" -Snapshot (New-SnapshotOnBoard $script:BoardA @("00-00-00-00-00-01")) -Confirmed $true)
+        [void](Save-TestRun -Serial "SN1" -Snapshot (New-SnapshotOnBoard $script:BoardA @("00-00-00-00-00-02")) -Confirmed $true)
+        $history = Get-UnitHistory -UnitSerial "SN1"
+        Assert-Equal 2 $history.ConfirmedRunNumber
+        Assert-Equal "PASS" (Compare-MacsToBaseline -History $history -Snapshot (New-SnapshotOnBoard $script:BoardA @("00-00-00-00-00-02"))).Status
+        Assert-Equal "FAIL" (Compare-MacsToBaseline -History $history -Snapshot (New-SnapshotOnBoard $script:BoardA @("00-00-00-00-00-01"))).Status
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Report lists only the Config's adapters, but the traveler records every MAC" {
+    $root = New-TestRoot
+    try {
+        $snap = New-TestSnapshot
+        $config = New-ConfigFromSnapshot -Snapshot $snap -Name "c"
+        $config.Network.Adapters = @($config.Network.Adapters | Where-Object { $_.AdapterContains -like "*Ethernet*" })
+        $rename = New-RenameInfo "SN1" "SN1" $true $false "x"
+        $path = Save-ValidationRun -History (Get-UnitHistory -UnitSerial "SN1") -TestPhase "Tier" -AppMode "Production" `
+            -Config $config -Snapshot $snap -RenameInfo $rename -Results @() -TravelerConfirmed $true
+        $text = Get-Content $path
+        Assert-True ($text -contains "Intel(R) Ethernet I219-LM")
+        Assert-True (-not ($text -match 'Realtek')) "the Wi-Fi adapter is not in the Config, so it is not listed"
+        Assert-Equal 2 @($text | Where-Object { $_ -like "Traveler MAC   : *" }).Count
+
+        $history = Get-UnitHistory -UnitSerial "SN1"
+        Assert-Equal "PASS" (Compare-MacsToBaseline -History $history -Snapshot $snap).Status "the Wi-Fi MAC is still part of the baseline"
+    }
+    finally { Remove-TestRoot $root }
+}
+
 Test-Case "MAC comparison ignores adapter model, case and separators" {
     $root = New-TestRoot
     try {
@@ -554,7 +681,7 @@ function New-RunFixture {
 }
 
 function Invoke-TestRun {
-    param([string]$Serial, $Machine, $Operator, [string]$Config = "cfg", [string]$Phase = "Tier")
+    param([string]$Serial, $Machine, $Operator, [string]$Config = "cfg", [string]$Phase = "Pre-Oven")
     return Invoke-ValidationRun -UnitSerial $Serial -TestPhase $Phase -ConfigBaseName $Config -AppMode "Production" `
         -Operator $Operator -Machine $Machine
 }
@@ -614,6 +741,35 @@ Test-Case "Next phase on the same unit asks nothing and checks MACs against the 
         Assert-Equal "PASS" (Get-Row $outcome "IDENTITY").Status
         Assert-Equal "PASS" (Get-Row $outcome "MAC ADDRESSES").Status
         Assert-True ((Get-Row $outcome "MAC ADDRESSES").Detail -like "*run 1*")
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Every Tier run asks the traveler again; Yes replaces the unit's MAC baseline" {
+    $root = New-RunFixture
+    try {
+        [void](Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA @("00-00-00-00-00-01") "SN100") (New-FakeOperator) -Phase "Tier")
+
+        # Wrong MACs were confirmed; the assembler fixes them and Tier is re-run.
+        $operator = New-FakeOperator
+        $outcome = Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA @("00-00-00-00-00-02") "SN100") $operator -Phase "Tier"
+        Assert-Equal "Traveler" ($operator.State.Asked -join ",")
+        Assert-Equal "PASS" $outcome.OverallResult
+
+        Assert-Equal "PASS" (Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA @("00-00-00-00-00-02") "SN100") (New-FakeOperator)).OverallResult
+        Assert-Equal "FAIL" (Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA @("00-00-00-00-00-01") "SN100") (New-FakeOperator)).OverallResult
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Tier re-confirmation answered No stops and keeps the old baseline" {
+    $root = New-RunFixture
+    try {
+        [void](Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA @("00-00-00-00-00-01") "SN100") (New-FakeOperator) -Phase "Tier")
+        $outcome = Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA @("00-00-00-00-00-02") "SN100") (New-FakeOperator -Traveler $false) -Phase "Tier"
+        Assert-Equal "Stopped" $outcome.Status
+        Assert-Equal 1 (Get-ReportFiles).Count
+        Assert-Equal 1 (Get-UnitHistory -UnitSerial "SN100").ConfirmedRunNumber
     }
     finally { Remove-TestRoot $root }
 }

@@ -6,18 +6,22 @@
 #   Stopped   - Focus ("Serial" | "Phase" | "Config"), Title, Message ($null
 #               when the operator chose to stop). Nothing was written and the
 #               computer was not renamed.
-#   Completed - Results, OverallResult, RenameInfo, SummaryPath, Snapshot.
+#   Completed - Results, OverallResult, RenameInfo, SummaryPath, Snapshot,
+#               Adapters (the Config's network adapters, as found on the unit).
 #
 # Order: every check that needs no operator answer runs first; then the
 # questions (Traveler Confirmation, Hardware Change, rename); nothing is
 # written to the Unit History until all of them are answered.
 #
 # Ports (hashtables of scriptblocks):
-#   Operator: ConfirmTraveler(UnitSerial, Adapters) -> bool
+#   Operator: ConfirmTraveler(UnitSerial, Adapters, ReplacesRunNumber) -> bool
 #             ApproveHardwareChange(UnitSerial, Changes) -> reason, or $null/"" to stop
 #             ConfirmRename(CurrentName, UnitSerial) -> bool
 #   Machine:  ReadIdentity, ReadSnapshot, ComputerName, PendingName, Rename(NewName)
 #             (New-WindowsMachine in Hardware.ps1)
+
+# The Test Phase at which the System Traveler is always re-confirmed.
+$script:TravelerPhase = "Tier"
 
 function New-StoppedOutcome {
     param([string]$Focus, [string]$Title = $null, [string]$Message = $null)
@@ -90,7 +94,10 @@ function Invoke-ValidationRun {
     $snapshot = & $Machine.ReadSnapshot
 
     # --- Operator questions (nothing written yet) ---------------------------
-    $confirmingTraveler = -not $history.TravelerConfirmed
+    # Every Tier run re-confirms the MACs against the System Traveler (this is
+    # how wrongly confirmed MACs are corrected); other phases ask only when the
+    # unit has never been confirmed.
+    $confirmingTraveler = (-not $history.TravelerConfirmed) -or ($TestPhase -ieq $script:TravelerPhase)
     if ($confirmingTraveler) {
         $adapters = @(
             @($snapshot.Network.Adapters) |
@@ -103,7 +110,8 @@ function Invoke-ValidationRun {
             }
         )
 
-        if (-not [bool](& $Operator.ConfirmTraveler $serial $adapters)) {
+        $replacesRun = if ($history.TravelerConfirmed) { $history.ConfirmedRunNumber } else { $null }
+        if (-not [bool](& $Operator.ConfirmTraveler $serial $adapters $replacesRun)) {
             return New-StoppedOutcome -Focus "Serial" -Title "Validation Stopped" -Message (
                 "Validation stopped. Nothing was recorded.`n`n" +
                 "Check that the unit, its serial label and the System Traveler belong together, " +
@@ -184,5 +192,6 @@ function Invoke-ValidationRun {
         RenameInfo = $renameInfo
         SummaryPath = $summaryPath
         Snapshot = $snapshot
+        Adapters = @(Get-ConfiguredNetworkAdapters -Config $config -Snapshot $snapshot)
     }
 }

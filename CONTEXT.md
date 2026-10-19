@@ -51,10 +51,14 @@ Creating a Config by recording the hardware of a known-good unit, then reviewing
 _Avoid_: Snapshot (that is the raw hardware reading), import
 
 **Required Component**:
-A disk, network adapter or GPU in a Config that must be present for the unit to pass. Components are required unless marked optional.
+A disk, network adapter, GPU or Required Device in a Config that must be present for the unit to pass. Components are required unless marked optional.
 
 **Optional Component**:
-A disk, network adapter or GPU in a Config that may be absent. If it is installed, it must still meet its spec. Rarely used, because a Config describes one exact build.
+A component in a Config that may be absent. If it is installed, it must still meet its spec. Rarely used, because a Config describes one exact build.
+
+**Required Device**:
+A device a test procedure expects to see in Device Manager (for example a boot shield), listed in a Config by its hardware ID. It must be present with no Device Manager problem for the unit to pass.
+_Avoid_: PnP device, driver check
 
 ## Process
 
@@ -75,11 +79,11 @@ Every Validation Run and Hardware Change recorded under one Unit Serial.
 _Avoid_: Reports folder, log
 
 **Traveler Confirmation**:
-The operator's confirmation, asked once per unit, that the MAC addresses detected on the unit (wired, Wi-Fi and Bluetooth) match its System Traveler. Until a unit has one, its runs cannot be recorded; answering No stops the run without recording anything.
+The operator's confirmation that the MAC addresses detected on the unit (wired, Wi-Fi and Bluetooth) match its System Traveler. It is asked at every Tier run, and on any run of a unit that has none yet; each new one replaces the unit's confirmed MAC addresses. Answering No stops the run without recording anything.
 _Avoid_: MAC approval, traveler check
 
 **Baseline**:
-What a unit's next run is compared against. Its motherboard (Hardware Fingerprint) and Config come from its latest run of any result; its MAC addresses are the ones confirmed in its Traveler Confirmation, and every later run must have exactly that set.
+What a unit's next run is compared against. Its motherboard (Hardware Fingerprint) and Config come from its latest run of any result; its MAC addresses are the ones confirmed in its latest Traveler Confirmation, and every other run must have exactly that set.
 _Avoid_: Previous summary, last report
 
 **Tier**:

@@ -47,10 +47,15 @@ function ConvertFrom-RunReport {
 
     $fields = @{}
     $macRecords = [System.Collections.Generic.List[string]]::new()
+    $travelerMacs = [System.Collections.Generic.List[string]]::new()
     $macAddressLines = [System.Collections.Generic.List[string]]::new()
     $travelerConfirmed = $false
 
     foreach ($line in Get-Content -Path $File.FullName -ErrorAction Stop) {
+        if ($line -match '^Traveler MAC\s*:\s*(.+)$') {
+            $travelerMacs.Add($matches[1].Trim())
+            continue
+        }
         if ($line -match '^MAC RECORD\s*:\s*(.+)$') {
             $macRecords.Add((($matches[1] -split '\|')[-1]).Trim())
             continue
@@ -71,8 +76,9 @@ function ConvertFrom-RunReport {
         }
     }
 
-    # Older reports only have the human-readable MAC lines.
-    $macSource = if ($macRecords.Count -gt 0) { $macRecords } else { $macAddressLines }
+    # Confirming runs list every MAC under "Traveler MAC". Older reports listed
+    # every adapter as "MAC RECORD", and before that only "MAC ADDRESS".
+    $macSource = if ($travelerMacs.Count -gt 0) { $travelerMacs } elseif ($macRecords.Count -gt 0) { $macRecords } else { $macAddressLines }
     $macKeys = @($macSource | ForEach-Object { ConvertTo-MacKey $_ } | Where-Object { $_ } | Sort-Object -Unique)
 
     $runNumber = $null
@@ -159,7 +165,8 @@ function Get-UnitHistory {
         if ($null -ne $r.RunNumber -and $r.RunNumber -gt $highest) { $highest = $r.RunNumber }
     }
 
-    $confirmedRun = @($runs | Where-Object { $_.TravelerConfirmed }) | Select-Object -First 1
+    # Each Traveler Confirmation (every Tier run) replaces the one before.
+    $confirmedRun = @($runs | Where-Object { $_.TravelerConfirmed }) | Select-Object -Last 1
 
     return [pscustomobject]@{
         UnitSerial = $serial
@@ -410,10 +417,22 @@ function Save-ValidationRun {
     $lines.Add("RAM            : $([double]$Snapshot.Memory.TotalGB) GB")
     $lines.Add("DIMM Count     : $([int]$Snapshot.Memory.DimmCount)")
     $lines.Add("")
+    if ($TravelerConfirmed) {
+        # Every MAC on the unit, including adapters the Config does not use:
+        # this is the unit's MAC baseline until its next Traveler Confirmation.
+        $lines.Add("SYSTEM TRAVELER")
+        $lines.Add("-"*72)
+        foreach ($key in @(Get-SnapshotMacKeys -Snapshot $Snapshot)) {
+            $lines.Add("Traveler MAC   : $(Format-MacKey $key)")
+        }
+        $lines.Add("")
+    }
+
+    # Only the adapters the Config lists are reported.
     $lines.Add("NETWORK / MAC ADDRESSES")
     $lines.Add("-"*72)
 
-    foreach ($a in @($Snapshot.Network.Adapters)) {
+    foreach ($a in @(Get-ConfiguredNetworkAdapters -Config $Config -Snapshot $Snapshot)) {
         $description = ([string]$a.InterfaceDescription).Trim()
         $mac = ([string]$a.MacAddress).Trim().ToUpperInvariant()
 

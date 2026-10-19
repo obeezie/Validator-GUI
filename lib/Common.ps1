@@ -84,6 +84,13 @@ function Test-ContainsText {
     return ($Text.IndexOf($Fragment, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)
 }
 
+# Windows numbers duplicate adapter descriptions ("... Connection #2"), and the
+# number can change between boots or phases. It is never part of a match.
+function Remove-EnumerationSuffix {
+    param([string]$Text)
+    return (([string]$Text) -replace '\s+#\d+\s*$', '').Trim()
+}
+
 function ConvertTo-InvariantDouble {
     param([string]$Text)
 

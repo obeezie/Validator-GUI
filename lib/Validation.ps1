@@ -4,7 +4,9 @@
 #
 # Required / optional components (disks, network adapters, GPUs):
 #   Required + missing          -> FAIL
-#   Optional + missing          -> INFO ("optional, not installed")
+#   Optional + missing          -> INFO ("optional, not installed") for disks
+#                                  and GPUs; no row at all for network
+#                                  adapters and Required Devices
 #   Present (either) but out of spec -> FAIL. Optional means "may be absent",
 #   not "may be broken".
 
@@ -152,18 +154,18 @@ function Test-SystemAgainstConfig {
 
     # Network
     $expectedNics = @(@($Config.Network.Adapters) | Where-Object { $null -ne $_ })
-    $nicMatches = Find-ComponentMatches -Expected $expectedNics -Actual @($Snapshot.Network.Adapters) -IsMatch {
-        param($exp, $act)
-        Test-ContainsText ([string]$act.InterfaceDescription) ([string]$exp.AdapterContains)
-    }
+    $nicMatches = Find-NetworkAdapterMatches -Expected $expectedNics -Snapshot $Snapshot
 
     for ($i = 0; $i -lt $expectedNics.Count; $i++) {
         $expected = $expectedNics[$i]
         $actual = $nicMatches[$i]
-        $checkName = Get-ComponentCheckName ([string]$expected.AdapterContains) $expected
+        $checkName = Get-ComponentCheckName (Remove-EnumerationSuffix ([string]$expected.AdapterContains)) $expected
 
         if ($null -eq $actual) {
-            $results.Add((New-MissingComponentResult "NETWORK" $checkName $expected "adapter"))
+            # Only the adapters the unit needs are reported.
+            if (Get-RequiredFlag $expected) {
+                $results.Add((New-MissingComponentResult "NETWORK" $checkName $expected "adapter"))
+            }
             continue
         }
 
@@ -212,7 +214,72 @@ function Test-SystemAgainstConfig {
         }
     }
 
+    # Required Devices (Device Manager)
+    $expectedDevices = @(@($Config.Devices) | Where-Object { $null -ne $_ })
+    $deviceMatches = Find-ComponentMatches -Expected $expectedDevices -Actual @($Snapshot.Devices) -IsMatch {
+        param($exp, $act)
+        $wanted = ([string]$exp.HardwareId).Trim()
+        @(@($act.HardwareIds) | Where-Object { ([string]$_) -ieq $wanted }).Count -gt 0
+    }
+
+    for ($i = 0; $i -lt $expectedDevices.Count; $i++) {
+        $expected = $expectedDevices[$i]
+        $actual = $deviceMatches[$i]
+        $label = if ([string]::IsNullOrWhiteSpace($expected.Name)) { [string]$expected.HardwareId } else { [string]$expected.Name }
+        $checkName = Get-ComponentCheckName $label $expected
+
+        if ($null -eq $actual) {
+            if (Get-RequiredFlag $expected) {
+                $results.Add((New-CheckResult "DEVICES" $checkName "FAIL" "Not found in Device Manager (hardware ID $([string]$expected.HardwareId))"))
+            }
+            continue
+        }
+
+        if ([int]$actual.ErrorCode -ne 0) {
+            $results.Add((New-CheckResult "DEVICES" $checkName "FAIL" `
+                "$([string]$actual.Name): Device Manager reports a problem (code $([int]$actual.ErrorCode): $(Get-DeviceProblemText ([int]$actual.ErrorCode)))"))
+        } else {
+            $results.Add((New-CheckResult "DEVICES" $checkName "PASS" "$([string]$actual.Name): present and working"))
+        }
+    }
+
     return @($results)
+}
+
+# Pairs each Config network adapter with a physical adapter by description,
+# ignoring Windows' "#2"-style numbering on both sides.
+function Find-NetworkAdapterMatches {
+    param([object[]]$Expected, $Snapshot)
+
+    return ,(Find-ComponentMatches -Expected $Expected -Actual @($Snapshot.Network.Adapters) -IsMatch {
+        param($exp, $act)
+        Test-ContainsText (Remove-EnumerationSuffix ([string]$act.InterfaceDescription)) (Remove-EnumerationSuffix ([string]$exp.AdapterContains))
+    })
+}
+
+# The physical adapters that correspond to the Config's network adapters,
+# i.e. the ones shown in results and reports.
+function Get-ConfiguredNetworkAdapters {
+    param($Config, $Snapshot)
+
+    $expected = @(@($Config.Network.Adapters) | Where-Object { $null -ne $_ })
+    return @(@(Find-NetworkAdapterMatches -Expected $expected -Snapshot $Snapshot) | Where-Object { $null -ne $_ })
+}
+
+# Device Manager problem codes (CM_PROB_*), as operators see them.
+function Get-DeviceProblemText {
+    param([int]$Code)
+
+    $texts = @{
+        1 = "not configured correctly"; 3 = "driver may be corrupted"; 10 = "cannot start"
+        12 = "not enough free resources"; 14 = "restart required"; 18 = "drivers need reinstalling"
+        19 = "registry configuration is damaged"; 21 = "being removed"; 22 = "disabled"
+        24 = "not present or not working properly"; 28 = "drivers are not installed"
+        31 = "not working properly"; 37 = "driver failed to initialize"; 39 = "driver is missing or corrupted"
+        43 = "stopped by Windows after reporting problems"; 45 = "not connected"; 52 = "driver signature cannot be verified"
+    }
+    if ($texts.ContainsKey($Code)) { return [string]$texts[$Code] }
+    return "see Device Manager"
 }
 
 function Test-ChecksPassed {

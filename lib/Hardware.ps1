@@ -69,6 +69,8 @@ function Get-HardwareSnapshot {
         }
     )
 
+    $devices = @(Get-DeviceList)
+
     $gpus = @(
         Get-CimInstance Win32_VideoController |
         ForEach-Object {
@@ -103,7 +105,49 @@ function Get-HardwareSnapshot {
         Storage = [pscustomobject]@{ PhysicalDisks = @($disks) }
         Network = [pscustomobject]@{ Adapters = @($net) }
         GPU = [pscustomobject]@{ Adapters = @($gpus) }
+        Devices = @($devices)
     }
+}
+
+# Every device Device Manager shows on this unit (Win32_PnPEntity lists the
+# present devices). ErrorCode is Device Manager's problem code; 0 = working.
+function Get-DeviceList {
+    return @(
+        Get-CimInstance Win32_PnPEntity |
+        ForEach-Object {
+            [pscustomobject]@{
+                Name = [string]$_.Name
+                Class = [string]$_.PNPClass
+                HardwareIds = @(@($_.HardwareID) | Where-Object { $_ })
+                InstanceId = [string]$_.PNPDeviceID
+                ErrorCode = [int]$_.ConfigManagerErrorCode
+            }
+        }
+    )
+}
+
+# Hardware IDs run from most to least specific. The revision (&REV_xx) can
+# differ between otherwise identical parts, so suggest the most specific ID
+# without one.
+function Select-DeviceHardwareId {
+    param([string[]]$HardwareIds)
+
+    $ids = @($HardwareIds | Where-Object { $_ })
+    if ($ids.Count -eq 0) { return $null }
+
+    $withoutRevision = @($ids | Where-Object { $_ -notmatch '&REV_' })
+    if ($withoutRevision.Count -gt 0) { return [string]$withoutRevision[0] }
+    return [string]$ids[0]
+}
+
+# Built-in system and software devices, hidden by default in the device picker.
+function Test-BuiltInDevice {
+    param($Device)
+
+    if (@("System", "SoftwareDevice", "SoftwareComponent", "Volume", "VolumeSnapshot", "LegacyDriver", "Computer", "Processor") -contains [string]$Device.Class) {
+        return $true
+    }
+    return ([string]$Device.InstanceId -match '^(ROOT|SWD|HTREE|ACPI_HAL|STORAGE\\VOLUME)\\')
 }
 
 # Returns an error message, or $null when the serial is usable as a Windows

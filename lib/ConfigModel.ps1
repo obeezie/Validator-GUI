@@ -9,6 +9,7 @@
 #   Storage { PhysicalDisks: [ { FriendlyNameContains, BusType, MinimumGB, Required } ] }
 #   Network { Adapters:      [ { AdapterContains, Required, MinimumLinkMbps, RequireUp } ] }
 #   GPU     { Adapters:      [ { ModelContains, Required } ] }
+#   Devices [ { Name, HardwareId, Required } ]   (Required Devices; Device Manager)
 #
 # Required defaults to true when missing. MinimumLinkMbps may be null (no
 # minimum). MinimumLogicalCPUs of 0 means "not checked".
@@ -114,6 +115,13 @@ function ConvertTo-NormalizedConfig {
                 }
             })
         }
+        Devices = @(@($Raw.Devices) | Where-Object { $null -ne $_ } | ForEach-Object {
+            [pscustomobject][ordered]@{
+                Name = [string]$_.Name
+                HardwareId = [string]$_.HardwareId
+                Required = [bool](Get-RequiredFlag $_)
+            }
+        })
     }
 }
 
@@ -157,6 +165,12 @@ function Test-ConfigDefinition {
     foreach ($g in @($Config.GPU.Adapters)) {
         $i++
         if ([string]::IsNullOrWhiteSpace($g.ModelContains)) { $errors.Add("GPU row ${i}: GPU model text is required.") }
+    }
+
+    $i = 0
+    foreach ($d in @($Config.Devices)) {
+        $i++
+        if ([string]::IsNullOrWhiteSpace($d.HardwareId)) { $errors.Add("Device row ${i}: hardware ID is required.") }
     }
 
     return @($errors)
@@ -248,7 +262,7 @@ function New-ConfigFromSnapshot {
                 }
 
                 [pscustomobject][ordered]@{
-                    AdapterContains = [string]$_.InterfaceDescription
+                    AdapterContains = Remove-EnumerationSuffix ([string]$_.InterfaceDescription)
                     Required = $true
                     MinimumLinkMbps = $minimum
                     RequireUp = ([string]$_.Status -eq "Up")
@@ -263,6 +277,8 @@ function New-ConfigFromSnapshot {
                 }
             })
         }
+        # Required Devices are chosen by the engineer in the config editor.
+        Devices = @()
     }
 }
 
@@ -341,7 +357,8 @@ function Build-CapturePreviewText {
 
     $lines.Add("")
     $lines.Add("All components are saved as Required. Use Edit Config afterwards to")
-    $lines.Add("mark components optional or adjust limits.")
+    $lines.Add("mark components optional, adjust limits, or add Required Devices")
+    $lines.Add("(Device Manager entries such as a boot shield).")
     $lines.Add("")
     $lines.Add("Confirm that the above hardware is the intended known-good configuration.")
 
@@ -398,13 +415,15 @@ function ConvertTo-EditorBool {
 #   StorageRows:  hashtables with FriendlyNameContains, BusType, MinimumGB (text), Required
 #   NetworkRows:  hashtables with AdapterContains, Required, RequireUp, MinimumLinkMbps (text)
 #   GpuRows:      hashtables with ModelContains, Required
+#   DeviceRows:   hashtables with Name, HardwareId, Required
 # Returns @{ Config = <config or $null>; Errors = <string[]> }.
 function ConvertFrom-ConfigEditorData {
     param(
         [hashtable]$General,
         [object[]]$StorageRows,
         [object[]]$NetworkRows,
-        [object[]]$GpuRows
+        [object[]]$GpuRows,
+        [object[]]$DeviceRows = @()
     )
 
     $errors = [System.Collections.Generic.List[string]]::new()
@@ -457,6 +476,16 @@ function ConvertFrom-ConfigEditorData {
         })
     }
 
+    $devices = [System.Collections.Generic.List[object]]::new()
+    foreach ($row in @($DeviceRows)) {
+        if ($null -eq $row -or (Test-BlankEditorRow $row @("Name","HardwareId"))) { continue }
+        $devices.Add([pscustomobject][ordered]@{
+            Name = ([string]$row.Name).Trim()
+            HardwareId = ([string]$row.HardwareId).Trim()
+            Required = ConvertTo-EditorBool $row.Required $true
+        })
+    }
+
     $config = [pscustomobject][ordered]@{
         Name = [string]$General.Name
         System = [pscustomobject][ordered]@{
@@ -475,6 +504,7 @@ function ConvertFrom-ConfigEditorData {
         Storage = [pscustomobject][ordered]@{ PhysicalDisks = @($disks) }
         Network = [pscustomobject][ordered]@{ Adapters = @($nics) }
         GPU = [pscustomobject][ordered]@{ Adapters = @($gpus) }
+        Devices = @($devices)
     }
 
     foreach ($e in @(Test-ConfigDefinition $config)) {

@@ -1,4 +1,4 @@
-WINDOWS HARDWARE VALIDATOR GUI - V20
+WINDOWS HARDWARE VALIDATOR GUI - V21
 ====================================
 
 Runs on Windows PowerShell 5.1, which is built into Windows 10/11. Nothing
@@ -59,29 +59,49 @@ Numbers count as earlier runs, ordered by the timestamp in their file name.
 
 SYSTEM TRAVELER CONFIRMATION
 ----------------------------
-The first time a Unit Serial is validated (and once for units that only
-have older reports), the validator lists every detected MAC address (wired,
-Wi-Fi and Bluetooth) and asks whether they match the unit's System Traveler.
-The default answer is No.
+At every Tier run, and on any run of a unit that has never been confirmed,
+the validator lists every detected MAC address (wired, Wi-Fi and Bluetooth,
+including adapters the Config does not use) and asks whether they match the
+unit's System Traveler. The default answer is No.
 
     No  - validation stops and nothing is recorded. Check that the unit,
           its serial label and the traveler belong together, and that the
           MAC addresses were programmed.
-    Yes - the confirmation is saved in that run's report and those MAC
-          addresses become the unit's baseline.
+    Yes - those MAC addresses become the unit's baseline, replacing any
+          earlier confirmation.
 
-Both Production and Engineer modes can confirm.
+Fixing wrongly assigned MAC addresses: correct the MACs, then re-run Tier
+and confirm the correct addresses against the traveler. Both Production and
+Engineer modes can confirm.
 
 MAC ADDRESS CHECK
 -----------------
-Every later run must have exactly the confirmed set of MAC addresses (the
-adapter model may differ; the addresses may not). Any difference FAILS the
-run and is listed as Missing / Unexpected. A failed run never changes the
-baseline. MAC addresses are checked after a motherboard replacement too,
+Runs at other phases must have exactly the confirmed set of MAC addresses
+(the adapter model may differ; the addresses may not). Any difference FAILS
+the run and is listed as Missing / Unexpected. A failed run never changes
+the baseline. MAC addresses are checked after a motherboard replacement too,
 because assigned MAC addresses do not change with the board.
 
 Note: Windows only shows a Bluetooth MAC address when the Bluetooth network
 adapter ("Bluetooth Device (Personal Area Network)") is present.
+
+NETWORK ADAPTERS IN RESULTS AND REPORTS
+---------------------------------------
+Only the adapters the Config lists are checked and shown (results table,
+Detected MAC Addresses box and report). An optional adapter that is not
+installed gets no row. Windows' "#2"/"#3" numbering of identical adapters is
+ignored when matching, so re-enumeration between phases does not fail a run.
+
+REQUIRED DEVICES (DEVICE MANAGER)
+---------------------------------
+A Config can list devices a test procedure expects in Device Manager, such
+as a boot shield. Add them in Engineer Mode: Edit Selected Config, Devices
+tab, either "Add Device from This Unit..." (pick from what Device Manager
+shows; built-in system devices are hidden unless ticked) or by typing a
+hardware ID. Each listed device must be present with no Device Manager
+problem; otherwise the run FAILS with the problem code (for example code 22,
+disabled). Listing the same hardware ID twice requires two such devices.
+Capture does not add devices.
 
 HARDWARE REPLACEMENT
 --------------------
@@ -102,6 +122,7 @@ Select a configuration and click "Edit Selected Config". Tabs:
     Network  - adapter text, Required, link must be Up, minimum Mbps
                (blank = no minimum)
     GPU      - GPU name text, Required
+    Devices  - Required Devices: label, hardware ID, Required
 
 Type in the blank last row to add a component. Select a row and click
 Remove Selected Row to delete one. Save re-registers the config's SHA-256,
@@ -189,6 +210,16 @@ run on a test station.
 
 CHANGE HISTORY
 ==============
+
+V21 - FIELD FIXES
+    - Every Tier run re-confirms MAC addresses against the System
+      Traveler and replaces the unit's confirmed MACs (fixes wrongly
+      assigned MACs).
+    - Adapter matching ignores Windows' "#n" numbering.
+    - Only the Config's adapters appear in results and reports; missing
+      optional adapters get no row. The traveler still covers every MAC.
+    - Required Devices: Device Manager checks configured in the editor's
+      new Devices tab.
 
 V20 - VALIDATION RUN MOVED OUT OF THE WINDOW CODE
     - The rules of a run (order of checks and questions, when to stop,

@@ -160,6 +160,129 @@ function New-EditorGridTab {
     $Tabs.TabPages.Add($page)
 }
 
+# Lists the devices Device Manager shows on this unit and returns the ones the
+# engineer ticks. Built-in system and software devices are hidden unless
+# "Show built-in system devices" is ticked.
+function Show-DevicePicker {
+    try {
+        $allDevices = @(Get-DeviceList | Sort-Object Class, Name)
+    }
+    catch {
+        Show-ErrorWithLog $_ "Unable to Read Device Manager"
+        return @()
+    }
+
+    $picker = New-Object System.Windows.Forms.Form
+    $picker.Text = "Add Required Devices from This Unit"
+    $picker.StartPosition = "CenterParent"
+    $picker.Size = New-Object System.Drawing.Size(860,560)
+    $picker.MinimumSize = New-Object System.Drawing.Size(640,400)
+    $picker.ShowInTaskbar = $false
+
+    $top = New-Object System.Windows.Forms.Panel
+    $top.Dock = [System.Windows.Forms.DockStyle]::Top
+    $top.Height = 40
+
+    $lblFilter = New-Object System.Windows.Forms.Label
+    $lblFilter.Text = "Filter:"
+    $lblFilter.Location = New-Object System.Drawing.Point(10,12)
+    $lblFilter.AutoSize = $true
+    $top.Controls.Add($lblFilter)
+
+    $txtFilter = New-Object System.Windows.Forms.TextBox
+    $txtFilter.Location = New-Object System.Drawing.Point(55,8)
+    $txtFilter.Size = New-Object System.Drawing.Size(300,24)
+    $top.Controls.Add($txtFilter)
+
+    $chkAll = New-Object System.Windows.Forms.CheckBox
+    $chkAll.Text = "Show built-in system devices"
+    $chkAll.Location = New-Object System.Drawing.Point(370,10)
+    $chkAll.AutoSize = $true
+    $top.Controls.Add($chkAll)
+
+    $list = New-Object System.Windows.Forms.ListView
+    $list.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $list.View = [System.Windows.Forms.View]::Details
+    $list.CheckBoxes = $true
+    $list.FullRowSelect = $true
+    $list.GridLines = $true
+    [void]$list.Columns.Add("Type", 120)
+    [void]$list.Columns.Add("Device", 300)
+    [void]$list.Columns.Add("Hardware ID", 380)
+
+    $bottom = New-Object System.Windows.Forms.Panel
+    $bottom.Dock = [System.Windows.Forms.DockStyle]::Bottom
+    $bottom.Height = 50
+    $bottom.Width = $picker.ClientSize.Width
+
+    $btnAdd = New-Object System.Windows.Forms.Button
+    $btnAdd.Text = "Add Ticked Devices"
+    $btnAdd.Size = New-Object System.Drawing.Size(150,32)
+    $btnAdd.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+    $btnAdd.Location = New-Object System.Drawing.Point(($picker.ClientSize.Width - 280),9)
+    $btnAdd.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $bottom.Controls.Add($btnAdd)
+
+    $btnCancel = New-Object System.Windows.Forms.Button
+    $btnCancel.Text = "Cancel"
+    $btnCancel.Size = New-Object System.Drawing.Size(110,32)
+    $btnCancel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+    $btnCancel.Location = New-Object System.Drawing.Point(($picker.ClientSize.Width - 122),9)
+    $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $bottom.Controls.Add($btnCancel)
+
+    $picker.Controls.Add($list)
+    $picker.Controls.Add($top)
+    $picker.Controls.Add($bottom)
+    $list.BringToFront()
+    $picker.CancelButton = $btnCancel
+
+    # Ticks survive re-filtering.
+    $state = @{ Ticked = @{}; Loading = $false }
+
+    $populate = {
+        $state.Loading = $true
+        $list.BeginUpdate()
+        $list.Items.Clear()
+        $filter = $txtFilter.Text.Trim()
+
+        foreach ($d in $allDevices) {
+            if (-not $chkAll.Checked -and (Test-BuiltInDevice $d)) { continue }
+            $suggested = [string](Select-DeviceHardwareId $d.HardwareIds)
+            if ([string]::IsNullOrWhiteSpace($suggested)) { continue }
+            if ($filter -and -not ((Test-ContainsText $d.Name $filter) -or (Test-ContainsText $d.Class $filter) -or (Test-ContainsText $suggested $filter))) { continue }
+
+            $item = New-Object System.Windows.Forms.ListViewItem([string]$d.Class)
+            [void]$item.SubItems.Add([string]$d.Name)
+            [void]$item.SubItems.Add($suggested)
+            $item.Tag = $d
+            $item.Checked = $state.Ticked.ContainsKey([string]$d.InstanceId)
+            [void]$list.Items.Add($item)
+        }
+
+        $list.EndUpdate()
+        $state.Loading = $false
+    }
+
+    $list.Add_ItemChecked({
+        param($sender, $e)
+        if ($state.Loading) { return }
+        $key = [string]$e.Item.Tag.InstanceId
+        if ($e.Item.Checked) { $state.Ticked[$key] = $e.Item.Tag } else { $state.Ticked.Remove($key) }
+    })
+    $txtFilter.Add_TextChanged({ & $populate })
+    $chkAll.Add_CheckedChanged({ & $populate })
+
+    & $populate
+    $result = $picker.ShowDialog($script:form)
+    $picker.Dispose()
+
+    if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
+        return @()
+    }
+    return @($state.Ticked.Values)
+}
+
 # Returns $true when the configuration was saved.
 function Show-ConfigEditor {
     param([string]$ConfigBaseName)
@@ -273,6 +396,17 @@ function Show-ConfigEditor {
     }
     New-EditorGridTab $tabs "GPU" $gridGpu $requiredHint
 
+    $gridDevices = New-EditorGrid @(
+        @{ Name = "Name"; Header = "Device (label shown in results)"; Type = "Text"; Width = 0 },
+        @{ Name = "HardwareId"; Header = "Hardware ID (exact)"; Type = "Text"; Width = 330 },
+        @{ Name = "Required"; Header = "Required"; Type = "Check"; Width = 80; Default = $true }
+    )
+    foreach ($d in @($config.Devices)) {
+        Add-EditorGridRow $gridDevices @([string]$d.Name, [string]$d.HardwareId, [bool]$d.Required)
+    }
+    New-EditorGridTab $tabs "Devices" $gridDevices ("Devices a test procedure expects in Device Manager (for example a boot shield). Each must be present with no problem " +
+        "for the unit to pass. Use Add Device from This Unit to pick from Device Manager, or type a hardware ID. Listing the same hardware ID twice requires two such devices.")
+
     # --- Bottom buttons ----------------------------------------------------
     $bottom = New-Object System.Windows.Forms.Panel
     $bottom.Dock = [System.Windows.Forms.DockStyle]::Bottom
@@ -286,6 +420,12 @@ function Show-ConfigEditor {
     $btnRemove.Location = New-Object System.Drawing.Point(12,10)
     $btnRemove.Size = New-Object System.Drawing.Size(160,32)
     $bottom.Controls.Add($btnRemove)
+
+    $btnAddDevice = New-Object System.Windows.Forms.Button
+    $btnAddDevice.Text = "Add Device from This Unit..."
+    $btnAddDevice.Location = New-Object System.Drawing.Point(182,10)
+    $btnAddDevice.Size = New-Object System.Drawing.Size(200,32)
+    $bottom.Controls.Add($btnAddDevice)
 
     $btnSave = New-Object System.Windows.Forms.Button
     $btnSave.Text = "Save"
@@ -315,14 +455,25 @@ function Show-ConfigEditor {
             "Storage" { $grid = $gridStorage }
             "Network" { $grid = $gridNetwork }
             "GPU"     { $grid = $gridGpu }
+            "Devices" { $grid = $gridDevices }
         }
 
         if ($null -eq $grid -or $null -eq $grid.CurrentRow -or $grid.CurrentRow.IsNewRow) {
-            Show-Message -Title "Remove Row" -Text "Open the Storage, Network or GPU tab and click a row to remove first."
+            Show-Message -Title "Remove Row" -Text "Open the Storage, Network, GPU or Devices tab and click a row to remove first."
             return
         }
 
         $grid.Rows.Remove($grid.CurrentRow)
+    })
+
+    $btnAddDevice.Add_Click({
+        foreach ($tab in $tabs.TabPages) {
+            if ($tab.Text -eq "Devices") { $tabs.SelectedTab = $tab }
+        }
+
+        foreach ($d in @(Show-DevicePicker)) {
+            Add-EditorGridRow $gridDevices @([string]$d.Name, [string](Select-DeviceHardwareId $d.HardwareIds), $true)
+        }
     })
 
     $btnSave.Add_Click({
@@ -342,7 +493,8 @@ function Show-ConfigEditor {
                 -General $generalValues `
                 -StorageRows @(Get-EditorGridRows $gridStorage) `
                 -NetworkRows @(Get-EditorGridRows $gridNetwork) `
-                -GpuRows @(Get-EditorGridRows $gridGpu)
+                -GpuRows @(Get-EditorGridRows $gridGpu) `
+                -DeviceRows @(Get-EditorGridRows $gridDevices)
 
             if (@($edited.Errors).Count -gt 0) {
                 Show-Message -Icon Warning -Title "Fix These Problems Before Saving" -Text ([string]::Join([Environment]::NewLine, @($edited.Errors)))
