@@ -44,7 +44,9 @@ function Invoke-ValidationRun {
         $Machine
     )
 
-    $serial = ([string]$UnitSerial).Trim()
+    # Unit Serials are always uppercase, so Reports folders, report names and
+    # computer names never differ only in case.
+    $serial = ([string]$UnitSerial).Trim().ToUpperInvariant()
 
     # --- Checks that need no operator answer --------------------------------
     $serialError = Test-SerialNumberFormat -SerialNumber $serial

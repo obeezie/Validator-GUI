@@ -9,7 +9,7 @@ The physical machine being validated.
 _Avoid_: System, computer, device, machine
 
 **Unit Serial**:
-Our own serial number for a unit, printed on its label and typed in by the operator. Test history is kept under it, and the Windows computer name of the Boot Drive the unit is running is set to it.
+Our own serial number for a unit, printed on its label and typed in by the operator. Always uppercase. Test history is kept under it, and the Windows computer name of the Boot Drive the unit is running is set to it.
 _Avoid_: Serial number (unqualified), computer name, hostname
 
 **BIOS Serial**:

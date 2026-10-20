@@ -88,6 +88,7 @@ $form.Controls.Add($lblSerial)
 $txtSerial = New-Object System.Windows.Forms.TextBox
 $txtSerial.Location = New-Object System.Drawing.Point(120,54)
 $txtSerial.Size = New-Object System.Drawing.Size(280,25)
+$txtSerial.CharacterCasing = [System.Windows.Forms.CharacterCasing]::Upper
 $form.Controls.Add($txtSerial)
 
 $lblPhase = New-Object System.Windows.Forms.Label

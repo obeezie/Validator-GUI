@@ -37,6 +37,15 @@ function Assert-Equal {
     }
 }
 
+# Case-sensitive: PowerShell's -ne ignores case, so Assert-Equal cannot tell
+# "sn100" from "SN100".
+function Assert-ExactEqual {
+    param([string]$Expected, [string]$Actual, [string]$Message = "")
+    if ($Expected -cne $Actual) {
+        throw "Expected exactly <$Expected> but got <$Actual>. $Message"
+    }
+}
+
 function Assert-True {
     param($Condition, [string]$Message = "condition was false")
     if (-not $Condition) { throw $Message }
@@ -954,6 +963,27 @@ Test-Case "Rename already pending to this serial: no prompt, restart still requi
         Assert-Equal "Traveler" ($operator.State.Asked -join ",")
         Assert-Equal $null $machine.State.Renamed
         Assert-True $outcome.RenameInfo.RebootRequired
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "A lowercase serial is recorded and used as the computer name in uppercase" {
+    $root = New-RunFixture
+    try {
+        $machine = New-FakeMachine $script:BoardA $script:Mac1 "OLDNAME"
+        $outcome = Invoke-TestRun " sn100 " $machine (New-FakeOperator)
+        Assert-Equal "PASS" $outcome.OverallResult
+        Assert-ExactEqual "SN100" $machine.State.Renamed
+        Assert-True ((Split-Path -Leaf $outcome.SummaryPath) -clike "SN100_Run001_*") (Split-Path -Leaf $outcome.SummaryPath)
+        Assert-ExactEqual "SN100" (Split-Path -Leaf (Split-Path -Parent $outcome.SummaryPath))
+        Assert-True ((Get-Content $outcome.SummaryPath) -ccontains "Serial Number  : SN100")
+
+        # The same unit typed in lowercase later: same history, no rename.
+        $operator = New-FakeOperator
+        $next = Invoke-TestRun "sn100" (New-FakeMachine $script:BoardA $script:Mac1 "SN100") $operator
+        Assert-Equal "PASS" $next.OverallResult
+        Assert-Equal 0 $operator.State.Asked.Count
+        Assert-True ((Split-Path -Leaf $next.SummaryPath) -clike "SN100_Run002_*") (Split-Path -Leaf $next.SummaryPath)
     }
     finally { Remove-TestRoot $root }
 }

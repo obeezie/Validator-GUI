@@ -40,7 +40,7 @@ function Update-IdentityStatusAndAutoSelectConfig {
     # History belongs to the Unit Serial. Until the operator has typed one,
     # the computer name is only a guess: on a shared Boot Drive it is the
     # previous unit's name.
-    $unitSerial = $script:txtSerial.Text.Trim()
+    $unitSerial = $script:txtSerial.Text.Trim().ToUpperInvariant()
     $serialIsGuess = $null -ne (Test-SerialNumberFormat -SerialNumber $unitSerial)
     if ($serialIsGuess) {
         $unitSerial = ([string]$env:COMPUTERNAME).Trim()

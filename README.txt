@@ -1,4 +1,4 @@
-WINDOWS HARDWARE VALIDATOR GUI - V23
+WINDOWS HARDWARE VALIDATOR GUI - V24
 ====================================
 
 Runs on Windows PowerShell 5.1, which is built into Windows 10/11. Nothing
@@ -36,6 +36,12 @@ config editor registers the new contents.
 
 UNIT HISTORY AND SHARED BOOT DRIVES
 -----------------------------------
+Serial numbers are always uppercase: the Serial Number box types in
+capitals, and the Reports folder, report file names and the computer name
+all use the uppercase serial. Windows treats folder names without regard to
+case, so a unit whose folder was created in lowercase before V24 keeps
+using that same folder.
+
 Each unit's Validation Runs are kept per Unit Serial (Reports\<UnitSerial>\),
 looked up by the serial the operator types, not by the Windows computer
 name. A shared test drive that moves from unit to unit still carries the
@@ -215,6 +221,10 @@ run on a test station.
 
 CHANGE HISTORY
 ==============
+
+V24 - UPPERCASE SERIAL NUMBERS
+    - The Unit Serial is converted to uppercase for reports, Reports
+      folders and the computer name; the serial box types in capitals.
 
 V23 - TRAVELER SHOWS ONLY THE CONFIG'S ADAPTERS
     - The Traveler Confirmation lists, and the MAC check compares, only
