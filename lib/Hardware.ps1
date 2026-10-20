@@ -1,7 +1,9 @@
 # Reads the current machine's hardware into a snapshot object, and renames
 # the computer to the unit serial number.
 
-# NdisPhysicalMedium 9 = NdisPhysicalMediumNative802_11 (Wi-Fi).
+# Wi-Fi and Bluetooth adapters. NdisPhysicalMedium 9 = Native 802.11 (Wi-Fi),
+# 10 = Bluetooth. Their link speed is never a pass/fail check, and Capture
+# saves them as optional (ignored).
 function Test-WirelessAdapter {
     param(
         [string]$PhysicalMediaType,
@@ -9,7 +11,7 @@ function Test-WirelessAdapter {
         [string]$Description
     )
 
-    if ($null -ne $NdisPhysicalMedium -and [string]$NdisPhysicalMedium -eq "9") {
+    if ($null -ne $NdisPhysicalMedium -and @("9", "10") -contains [string]$NdisPhysicalMedium) {
         return $true
     }
 
@@ -17,7 +19,7 @@ function Test-WirelessAdapter {
         return $true
     }
 
-    return ($Description -match 'Wi-?Fi|Wireless|WLAN|802\.11')
+    return ($Description -match 'Wi-?Fi|Wireless|WLAN|802\.11|Bluetooth')
 }
 
 function Get-HardwareSnapshot {

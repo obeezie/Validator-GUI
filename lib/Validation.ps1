@@ -5,8 +5,9 @@
 # Required / optional components (disks, network adapters, GPUs):
 #   Required + missing          -> FAIL
 #   Optional + missing          -> INFO ("optional, not installed") for disks
-#                                  and GPUs; no row at all for network
-#                                  adapters and Required Devices
+#                                  and GPUs; no row for Required Devices
+#   Network adapters: only required ones are checked or shown; an optional
+#   network adapter is ignored entirely, present or not.
 #   Present (either) but out of spec -> FAIL. Optional means "may be absent",
 #   not "may be broken".
 
@@ -152,8 +153,8 @@ function Test-SystemAgainstConfig {
         $results.Add((New-CheckResult "STORAGE" $checkName (Get-PassFail ($problems.Count -eq 0)) $detail))
     }
 
-    # Network
-    $expectedNics = @(@($Config.Network.Adapters) | Where-Object { $null -ne $_ })
+    # Network (required adapters only)
+    $expectedNics = @(Get-RequiredNetworkAdapterEntries -Config $Config)
     $nicMatches = Find-NetworkAdapterMatches -Expected $expectedNics -Snapshot $Snapshot
 
     for ($i = 0; $i -lt $expectedNics.Count; $i++) {
@@ -260,12 +261,18 @@ function Find-NetworkAdapterMatches {
     return ,$matched
 }
 
-# The physical adapters that correspond to the Config's network adapters,
-# i.e. the ones shown in results and reports.
-function Get-ConfiguredNetworkAdapters {
+# The Config's required network adapters. Optional ones are ignored.
+function Get-RequiredNetworkAdapterEntries {
+    param($Config)
+    return @(@($Config.Network.Adapters) | Where-Object { $null -ne $_ -and (Get-RequiredFlag $_) })
+}
+
+# The physical adapters that correspond to the Config's required network
+# adapters: the only ones checked, shown, confirmed and reported.
+function Get-RequiredNetworkAdapters {
     param($Config, $Snapshot)
 
-    $expected = @(@($Config.Network.Adapters) | Where-Object { $null -ne $_ })
+    $expected = @(Get-RequiredNetworkAdapterEntries -Config $Config)
     # Assign first: the matches come back as one wrapped array, and piping the
     # call directly would pass that whole array along as a single item.
     $matched = Find-NetworkAdapterMatches -Expected $expected -Snapshot $Snapshot

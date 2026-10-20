@@ -261,9 +261,11 @@ function New-ConfigFromSnapshot {
                     $minimum = [double]$_.LinkSpeedMbps
                 }
 
+                # Wired adapters are required; Wi-Fi and Bluetooth are saved
+                # as optional (ignored) until the engineer ticks Required.
                 [pscustomobject][ordered]@{
                     AdapterContains = Remove-EnumerationSuffix ([string]$_.InterfaceDescription)
-                    Required = $true
+                    Required = (-not [bool]$_.IsWireless)
                     MinimumLinkMbps = $minimum
                     RequireUp = ([string]$_.Status -eq "Up")
                 }
@@ -287,7 +289,8 @@ function Get-NetworkCaptureWarnings {
 
     $warnings = [System.Collections.Generic.List[string]]::new()
 
-    foreach ($a in @($Snapshot.Network.Adapters)) {
+    # Wi-Fi and Bluetooth are captured as optional, so only wired links matter.
+    foreach ($a in @($Snapshot.Network.Adapters | Where-Object { -not [bool]$_.IsWireless })) {
         if ([string]$a.Status -ne "Up") {
             $warnings.Add("$([string]$a.InterfaceDescription) is not linked/up (Status=$([string]$a.Status)).")
         }
@@ -356,9 +359,10 @@ function Build-CapturePreviewText {
     }
 
     $lines.Add("")
-    $lines.Add("All components are saved as Required. Use Edit Config afterwards to")
-    $lines.Add("mark components optional, adjust limits, or add Required Devices")
-    $lines.Add("(Device Manager entries such as a boot shield).")
+    $lines.Add("All components are saved as Required, except Wi-Fi and Bluetooth")
+    $lines.Add("adapters, which are saved as optional and ignored. Use Edit Config")
+    $lines.Add("afterwards to tick Required for wireless adapters this build uses,")
+    $lines.Add("adjust limits, or add Required Devices (e.g. a boot shield).")
     $lines.Add("")
     $lines.Add("Confirm that the above hardware is the intended known-good configuration.")
 

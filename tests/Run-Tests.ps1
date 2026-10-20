@@ -126,6 +126,8 @@ Test-Case "Wireless adapter detection" {
     Assert-True (Test-WirelessAdapter -PhysicalMediaType "Native 802.11" -NdisPhysicalMedium 9 -Description "x")
     Assert-True (Test-WirelessAdapter -PhysicalMediaType "" -NdisPhysicalMedium $null -Description "Intel(R) Wi-Fi 6E AX211")
     Assert-True (-not (Test-WirelessAdapter -PhysicalMediaType "802.3" -NdisPhysicalMedium 14 -Description "Intel(R) Ethernet I219-LM"))
+    Assert-True (Test-WirelessAdapter -PhysicalMediaType "BlueTooth" -NdisPhysicalMedium 10 -Description "x") "Bluetooth (medium 10)"
+    Assert-True (Test-WirelessAdapter -PhysicalMediaType "" -NdisPhysicalMedium $null -Description "Bluetooth Device (Personal Area Network)")
 }
 
 Test-Case "Serial number format rules" {
@@ -150,13 +152,14 @@ Test-Case "Fingerprint ignores placeholder IDs" {
 
 Write-Host "Config model"
 
-Test-Case "Captured config: all components required, no Wi-Fi speed minimum" {
+Test-Case "Captured config: wired adapters required, Wi-Fi/Bluetooth optional, no wireless speed minimum" {
     $config = New-ConfigFromSnapshot -Snapshot (New-TestSnapshot) -Name "test"
     Assert-True ($config.Storage.PhysicalDisks[0].Required)
     Assert-True ($config.GPU.Adapters[0].Required)
     $wifi = @($config.Network.Adapters | Where-Object { $_.AdapterContains -like "*WiFi*" })[0]
     $lan = @($config.Network.Adapters | Where-Object { $_.AdapterContains -like "*Ethernet*" })[0]
-    Assert-True ($wifi.Required)
+    Assert-True (-not $wifi.Required) "Wi-Fi is captured as optional (ignored)"
+    Assert-True ($lan.Required)
     Assert-Equal $null $wifi.MinimumLinkMbps
     Assert-Equal 1000 $lan.MinimumLinkMbps
     Assert-Equal 15.2 $config.Memory.MinimumTotalGB
@@ -292,6 +295,29 @@ Test-Case "Optional network adapters and devices that are not installed get no r
     Assert-Equal 0 @(Get-ResultFor $results "DEVICES" "*").Count
 }
 
+Test-Case "Optional network adapters are ignored even when present" {
+    $root = New-TestRoot
+    try {
+        $snap = New-TestSnapshot
+        $config = New-ConfigFromSnapshot -Snapshot $snap -Name "c"   # Wi-Fi captured as optional
+        $config.Network.Adapters | Where-Object { $_.AdapterContains -like "*Realtek*" } | ForEach-Object { $_.MinimumLinkMbps = 1000; $_.RequireUp = $true }
+        $snap.Network.Adapters[0].Status = "Disconnected"
+
+        $results = Test-SystemAgainstConfig -Config $config -Snapshot $snap
+        Assert-Equal 0 @(Get-ResultFor $results "NETWORK" "*Realtek*").Count "no row, and its link is not checked"
+        Assert-Equal "Intel(R) Ethernet I219-LM" ((@(Get-RequiredNetworkAdapters -Config $config -Snapshot $snap) | ForEach-Object { $_.InterfaceDescription }) -join ",")
+
+        $rename = New-RenameInfo "SN1" "SN1" $true $false "x"
+        $path = Save-ValidationRun -History (Get-UnitHistory -UnitSerial "SN1") -TestPhase "Tier" -AppMode "Production" `
+            -Config $config -Snapshot $snap -RenameInfo $rename -Results @($results) -TravelerConfirmed $true
+        Assert-True (-not ((Get-Content $path) -match 'Realtek|40-1A-58')) "not in the report or traveler baseline"
+
+        $snap.Network.Adapters[0].MacAddress = "AA-AA-AA-AA-AA-AA"
+        Assert-Equal "PASS" (Compare-MacsToBaseline -History (Get-UnitHistory -UnitSerial "SN1") -Snapshot $snap -Config $config).Status
+    }
+    finally { Remove-TestRoot $root }
+}
+
 Test-Case "Required Devices: only presence counts, not driver state" {
     $snap = New-TestSnapshot
     $config = New-ConfigFromSnapshot -Snapshot $snap -Name "t"
@@ -353,7 +379,7 @@ Test-Case "Only adapters the Config lists are reported" {
     $snap = New-TestSnapshot
     $config = New-ConfigFromSnapshot -Snapshot $snap -Name "t"
     $config.Network.Adapters = @($config.Network.Adapters | Where-Object { $_.AdapterContains -like "*Ethernet*" })
-    $listed = @(Get-ConfiguredNetworkAdapters -Config $config -Snapshot $snap)
+    $listed = @(Get-RequiredNetworkAdapters -Config $config -Snapshot $snap)
     Assert-Equal 1 $listed.Count
     Assert-Equal "Intel(R) Ethernet I219-LM" $listed[0].InterfaceDescription
 }
@@ -363,9 +389,10 @@ Test-Case "Two or more Config adapters stay separate (traveler, MAC box, report)
     try {
         $snap = New-TestSnapshot
         $config = New-ConfigFromSnapshot -Snapshot $snap -Name "c"
+        $config.Network.Adapters | ForEach-Object { $_.Required = $true }
         Assert-Equal 2 @($config.Network.Adapters).Count
 
-        $listed = @(Get-ConfiguredNetworkAdapters -Config $config -Snapshot $snap)
+        $listed = @(Get-RequiredNetworkAdapters -Config $config -Snapshot $snap)
         Assert-Equal 2 $listed.Count
         Assert-Equal "40-1A-58-83-6F-A0|00-11-22-33-44-55" (($listed | ForEach-Object { [string]$_.MacAddress }) -join "|")
 
@@ -434,6 +461,7 @@ Test-Case "Required entry claims a device before an optional one" {
 Test-Case "Wi-Fi link speed never fails, even with an old minimum in the config" {
     $snap = New-TestSnapshot
     $config = New-ConfigFromSnapshot -Snapshot $snap -Name "t"
+    $config.Network.Adapters | ForEach-Object { $_.Required = $true }
     @($config.Network.Adapters | Where-Object { $_.AdapterContains -like "*WiFi*" })[0].MinimumLinkMbps = 72.2
     $snap.Network.Adapters[0].LinkSpeedMbps = 6.5
     $snap.Network.Adapters[0].LinkSpeed = "6.5 Mbps"
@@ -860,6 +888,7 @@ Test-Case "Units confirmed before V23 (every MAC in the baseline) still pass" {
     try {
         $snap = New-TestSnapshot
         $config = New-ConfigFromSnapshot -Snapshot $snap -Name "c"
+        $config.Network.Adapters | ForEach-Object { $_.Required = $true }
         $rename = New-RenameInfo "SN1" "SN1" $true $false "x"
         # V21/V22 recorded the Wi-Fi MAC too.
         [void](Save-ValidationRun -History (Get-UnitHistory -UnitSerial "SN1") -TestPhase "Tier" -AppMode "Production" `

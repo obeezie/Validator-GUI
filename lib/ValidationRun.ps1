@@ -103,7 +103,7 @@ function Invoke-ValidationRun {
     if ($confirmingTraveler) {
         # Only the adapters the Config uses are shown and confirmed.
         $adapters = @(
-            @(Get-ConfiguredNetworkAdapters -Config $config -Snapshot $snapshot) |
+            @(Get-RequiredNetworkAdapters -Config $config -Snapshot $snapshot) |
             Where-Object { ConvertTo-MacKey ([string]$_.MacAddress) } |
             ForEach-Object {
                 [pscustomobject]@{
@@ -195,6 +195,6 @@ function Invoke-ValidationRun {
         RenameInfo = $renameInfo
         SummaryPath = $summaryPath
         Snapshot = $snapshot
-        Adapters = @(Get-ConfiguredNetworkAdapters -Config $config -Snapshot $snapshot)
+        Adapters = @(Get-RequiredNetworkAdapters -Config $config -Snapshot $snapshot)
     }
 }

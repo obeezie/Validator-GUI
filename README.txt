@@ -1,4 +1,4 @@
-WINDOWS HARDWARE VALIDATOR GUI - V25
+WINDOWS HARDWARE VALIDATOR GUI - V26
 ====================================
 
 Runs on Windows PowerShell 5.1, which is built into Windows 10/11. Nothing
@@ -66,9 +66,9 @@ Numbers count as earlier runs, ordered by the timestamp in their file name.
 SYSTEM TRAVELER CONFIRMATION
 ----------------------------
 At every Tier run, and on any run of a unit that has never been confirmed,
-the validator lists the MAC addresses of the network adapters the selected
-Config uses (wired, Wi-Fi or Bluetooth) and asks whether they match the
-unit's System Traveler. Adapters the Config does not use are not shown and
+the validator lists the MAC addresses of the selected Config's REQUIRED
+network adapters and asks whether they match the unit's System Traveler.
+Optional adapters, and adapters the Config does not list, are not shown and
 never affect the MAC check. The default answer is No.
 
     No  - validation stops and nothing is recorded. Check that the unit,
@@ -94,10 +94,15 @@ adapter ("Bluetooth Device (Personal Area Network)") is present.
 
 NETWORK ADAPTERS IN RESULTS AND REPORTS
 ---------------------------------------
-Only the adapters the Config lists are checked and shown (results table,
-Detected MAC Addresses box and report). An optional adapter that is not
-installed gets no row. The Traveler Confirmation and MAC check also cover
-only these adapters. Windows' "#2"/"#3" numbering of identical adapters is
+Only the Config's REQUIRED network adapters are checked and shown (results
+table, Detected MAC Addresses box, report, Traveler Confirmation and MAC
+check). An adapter with Required unticked is ignored entirely, whether or
+not it is installed.
+
+Capture saves wired adapters as Required and Wi-Fi/Bluetooth adapters as
+optional (ignored). For a build that uses Wi-Fi or Bluetooth, tick Required
+for it in Edit Selected Config > Network. Configs captured before V26 have
+every adapter Required: untick the ones that build does not use. Windows' "#2"/"#3" numbering of identical adapters is
 ignored when matching, so re-enumeration between phases does not fail a run.
 
 REQUIRED DEVICES (DEVICE MANAGER)
@@ -221,6 +226,13 @@ run on a test station.
 
 CHANGE HISTORY
 ==============
+
+V26 - ONLY REQUIRED NETWORK ADAPTERS
+    - Optional network adapters are ignored entirely (not shown, checked
+      or confirmed), even when installed.
+    - Capture saves Wi-Fi and Bluetooth adapters as optional; Bluetooth
+      is now recognised as wireless (no link-speed minimum). The capture
+      link warning only covers wired adapters.
 
 V25 - FIX: CONFIGS WITH TWO OR MORE NETWORK ADAPTERS
     - V21-V24 merged all of a Config's adapters into one line in the

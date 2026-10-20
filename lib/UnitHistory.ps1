@@ -37,7 +37,7 @@ function Format-MacKey {
 function Get-SnapshotMacKeys {
     param($Snapshot, $Config = $null)
 
-    $adapters = if ($null -ne $Config) { @(Get-ConfiguredNetworkAdapters -Config $Config -Snapshot $Snapshot) } else { @($Snapshot.Network.Adapters) }
+    $adapters = if ($null -ne $Config) { @(Get-RequiredNetworkAdapters -Config $Config -Snapshot $Snapshot) } else { @($Snapshot.Network.Adapters) }
     return @(
         $adapters |
         ForEach-Object { ConvertTo-MacKey ([string]$_.MacAddress) } |
@@ -443,7 +443,7 @@ function Save-ValidationRun {
     $lines.Add("NETWORK / MAC ADDRESSES")
     $lines.Add("-"*72)
 
-    foreach ($a in @(Get-ConfiguredNetworkAdapters -Config $Config -Snapshot $Snapshot)) {
+    foreach ($a in @(Get-RequiredNetworkAdapters -Config $Config -Snapshot $Snapshot)) {
         $description = ([string]$a.InterfaceDescription).Trim()
         $mac = ([string]$a.MacAddress).Trim().ToUpperInvariant()
 

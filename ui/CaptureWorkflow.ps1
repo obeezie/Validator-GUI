@@ -99,7 +99,8 @@ function Invoke-ConfigCapture {
     $openEditor = Confirm-Message -Icon Information -Title "Capture Complete" -Text (
         "Configuration reviewed, captured, and integrity-registered.`n`n" +
         "Hardware config:`n$path`n`n" +
-        "All components were saved as Required. Open the config editor now to adjust limits or mark components optional?"
+        "All components were saved as Required, except Wi-Fi and Bluetooth adapters, which are optional (ignored). " +
+        "Open the config editor now to tick Required for wireless adapters this build uses, adjust limits, or add Required Devices?"
     )
 
     if ($openEditor) {

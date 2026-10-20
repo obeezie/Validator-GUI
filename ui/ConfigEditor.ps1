@@ -386,7 +386,9 @@ function Show-ConfigEditor {
             -AdapterContains ([string]$row.Cells["AdapterContains"].Value) `
             -MinimumLinkMbps ([string]$row.Cells["MinimumLinkMbps"].Value)
     })
-    New-EditorGridTab $tabs "Network" $gridNetwork "$requiredHint Wireless adapters never enforce a minimum link speed."
+    New-EditorGridTab $tabs "Network" $gridNetwork ("Only adapters with Required ticked are checked, shown and confirmed against the System Traveler; " +
+        "unticked adapters are ignored. Wi-Fi and Bluetooth never enforce a minimum link speed. Type in the last (blank) row to add an adapter; " +
+        "select a row and use Remove Selected Row to delete one.")
 
     $gridGpu = New-EditorGrid @(
         @{ Name = "ModelContains"; Header = "GPU name contains"; Type = "Text"; Width = 0 },

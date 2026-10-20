@@ -54,7 +54,7 @@ _Avoid_: Snapshot (that is the raw hardware reading), import
 A disk, network adapter, GPU or Required Device in a Config that must be present for the unit to pass. Components are required unless marked optional.
 
 **Optional Component**:
-A component in a Config that may be absent. If it is installed, it must still meet its spec. Rarely used, because a Config describes one exact build.
+A component in a Config that may be absent. If it is installed, it must still meet its spec. Rarely used, because a Config describes one exact build. An optional network adapter is the exception: it is ignored entirely, present or not. Capture saves Wi-Fi and Bluetooth adapters as optional.
 
 **Required Device**:
 A device a test procedure expects to see in Device Manager (for example a boot shield), listed in a Config by its hardware ID. It must be present for the unit to pass; its driver state is not checked, because installing drivers is the customer's responsibility.
@@ -79,7 +79,7 @@ Every Validation Run and Hardware Change recorded under one Unit Serial.
 _Avoid_: Reports folder, log
 
 **Traveler Confirmation**:
-The operator's confirmation that the MAC addresses of the network adapters the unit's Config uses (wired, Wi-Fi or Bluetooth) match its System Traveler. Adapters the Config does not use are not shown or checked. It is asked at every Tier run, and on any run of a unit that has none yet; each new one replaces the unit's confirmed MAC addresses. Answering No stops the run without recording anything.
+The operator's confirmation that the MAC addresses of the unit's required network adapters (wired, or Wi-Fi/Bluetooth when the Config requires them) match its System Traveler. Optional and unlisted adapters are not shown or checked. It is asked at every Tier run, and on any run of a unit that has none yet; each new one replaces the unit's confirmed MAC addresses. Answering No stops the run without recording anything.
 _Avoid_: MAC approval, traveler check
 
 **Baseline**:
