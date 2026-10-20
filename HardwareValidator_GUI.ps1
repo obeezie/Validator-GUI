@@ -157,6 +157,38 @@ $lblOverall.Font = New-Object System.Drawing.Font("Segoe UI",16,[System.Drawing.
 $lblOverall.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
 $form.Controls.Add($lblOverall)
 
+# Restart banner (hidden until a passing run renames the computer).
+$pnlRestart = New-Object System.Windows.Forms.Panel
+$pnlRestart.Location = New-Object System.Drawing.Point(20,232)
+$pnlRestart.Size = New-Object System.Drawing.Size(950,44)
+$pnlRestart.BackColor = [System.Drawing.Color]::FromArgb(255, 243, 205)
+$pnlRestart.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+$pnlRestart.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+$pnlRestart.Visible = $false
+
+$lblRestart = New-Object System.Windows.Forms.Label
+$lblRestart.Location = New-Object System.Drawing.Point(10,5)
+$lblRestart.Size = New-Object System.Drawing.Size(650,32)
+$lblRestart.Font = New-Object System.Drawing.Font("Segoe UI",9.5,[System.Drawing.FontStyle]::Bold)
+$lblRestart.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+$pnlRestart.Controls.Add($lblRestart)
+
+$btnRestartNow = New-Object System.Windows.Forms.Button
+$btnRestartNow.Text = "Restart Now"
+$btnRestartNow.Location = New-Object System.Drawing.Point(670,6)
+$btnRestartNow.Size = New-Object System.Drawing.Size(130,30)
+$btnRestartNow.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+$pnlRestart.Controls.Add($btnRestartNow)
+
+$btnRestartLater = New-Object System.Windows.Forms.Button
+$btnRestartLater.Text = "Restart Later"
+$btnRestartLater.Location = New-Object System.Drawing.Point(808,6)
+$btnRestartLater.Size = New-Object System.Drawing.Size(130,30)
+$btnRestartLater.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+$pnlRestart.Controls.Add($btnRestartLater)
+
+$form.Controls.Add($pnlRestart)
+
 $lvResults = New-Object System.Windows.Forms.ListView
 $lvResults.Location = New-Object System.Drawing.Point(20,240)
 $lvResults.Size = New-Object System.Drawing.Size(950,305)
@@ -234,6 +266,24 @@ $btnEditConfig.Add_Click({
     }
     catch {
         Show-ErrorWithLog $_ "Config Editor Error"
+    }
+})
+
+$btnRestartNow.Add_Click({
+    try { Invoke-RestartNow } catch { Show-ErrorWithLog $_ "Restart Error" }
+})
+
+$btnRestartLater.Add_Click({ Set-RestartLater })
+
+# A rename only takes effect after a restart: if the operator closes the
+# validator without choosing from the restart banner, ask once more.
+$form.Add_FormClosing({
+    param($sender, $e)
+    try {
+        if (-not (Confirm-CloseWithPendingRestart)) { $e.Cancel = $true }
+    }
+    catch {
+        Write-ErrorLog $_
     }
 })
 

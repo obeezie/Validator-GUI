@@ -206,6 +206,7 @@ function New-DialogOperator {
 
 # Runs one Validation Run (lib\ValidationRun.ps1) and shows its outcome.
 function Invoke-SystemValidation {
+    Hide-RestartBanner
     $script:lvResults.Items.Clear()
     $script:txtMacs.Clear()
     Set-OverallLabel "RUNNING..." ([System.Drawing.Color]::LightYellow)
@@ -272,9 +273,96 @@ function Invoke-SystemValidation {
         Show-Message -Icon Error -Title "Rename Error" -Text "Computer rename failed:`n$($renameInfo.Detail)"
     }
     elseif ($renameInfo.RebootRequired) {
-        $restart = Confirm-Message -Title "Restart Required" -Text "The computer will be renamed to '$($renameInfo.RequestedName)' after a restart.`n`nWould you like to restart now?"
-        if ($restart) {
-            Restart-Computer -Force
-        }
+        # No popup over the results: the operator reviews them, then chooses
+        # from the banner. Closing without choosing asks once more.
+        Show-RestartBanner -PreviousName ([string]$renameInfo.PreviousName) -NewName ([string]$renameInfo.RequestedName)
     }
+}
+
+# ---------------------------------------------------------------------------
+# Restart banner: shown above the results when a passing run renamed the
+# computer. State: Pending (a restart is needed) and Decided (the operator
+# clicked Restart Now or Restart Later).
+# ---------------------------------------------------------------------------
+
+$script:RestartState = @{ Pending = $false; Decided = $false; NewName = ""; BannerShown = $false }
+
+function Set-RestartBannerVisible {
+    param([bool]$Visible)
+
+    # Tracked here: a control's Visible reads false while the window is hidden.
+    if ($script:RestartState.BannerShown -eq $Visible) { return }
+    $script:RestartState.BannerShown = $Visible
+
+    # Make room for the banner by moving the top of the results list down.
+    $shift = $script:pnlRestart.Height + 6
+    if ($Visible) {
+        $script:lvResults.Top += $shift
+        $script:lvResults.Height -= $shift
+    } else {
+        $script:lvResults.Top -= $shift
+        $script:lvResults.Height += $shift
+    }
+    $script:pnlRestart.Visible = $Visible
+}
+
+function Show-RestartBanner {
+    param([string]$PreviousName, [string]$NewName)
+
+    $script:RestartState.Pending = $true
+    $script:RestartState.Decided = $false
+    $script:RestartState.NewName = $NewName
+
+    $script:lblRestart.Text = "Validation passed. Restart to finish renaming this computer from $PreviousName to $NewName."
+    $script:btnRestartLater.Visible = $true
+    Set-RestartBannerVisible $true
+}
+
+function Hide-RestartBanner {
+    $script:RestartState.Pending = $false
+    $script:RestartState.Decided = $false
+    $script:RestartState.NewName = ""
+    Set-RestartBannerVisible $false
+}
+
+function Invoke-RestartNow {
+    $script:RestartState.Decided = $true
+    Restart-Computer -Force
+}
+
+function Set-RestartLater {
+    $script:RestartState.Decided = $true
+    $script:lblRestart.Text = "Restart pending: this computer becomes $($script:RestartState.NewName) after a restart. Restart before the next phase."
+    $script:btnRestartLater.Visible = $false
+}
+
+# Called when the validator is closing. Returns $true to let it close.
+# Asks only when a restart is pending and the operator chose nothing from
+# the banner.
+function Confirm-CloseWithPendingRestart {
+    if (-not $script:RestartState.Pending -or $script:RestartState.Decided) {
+        return $true
+    }
+
+    $answer = Show-RestartOnCloseQuestion -NewName $script:RestartState.NewName
+    if ($answer -eq "Cancel") {
+        return $false
+    }
+    if ($answer -eq "Yes") {
+        Invoke-RestartNow
+    }
+    return $true
+}
+
+function Show-RestartOnCloseQuestion {
+    param([string]$NewName)
+
+    $result = [System.Windows.Forms.MessageBox]::Show(
+        $script:form,
+        "This computer will be renamed to '$NewName' after a restart.`n`nRestart now?`n`n(Cancel keeps the validator open.)",
+        "Restart Required",
+        [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+    return [string]$result
 }

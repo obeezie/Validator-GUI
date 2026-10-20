@@ -1,4 +1,4 @@
-WINDOWS HARDWARE VALIDATOR GUI - V26
+WINDOWS HARDWARE VALIDATOR GUI - V27
 ====================================
 
 Runs on Windows PowerShell 5.1, which is built into Windows 10/11. Nothing
@@ -178,7 +178,12 @@ the current computer name. It shows both names and asks the operator to
 confirm the serial; the default button is No. Choosing No stops validation
 so the serial can be corrected, before any checks run or a report is filed.
 
-The computer is renamed only when every check PASSES. A failing unit keeps
+The computer is renamed only when every check PASSES. The rename takes
+effect after a restart: instead of a popup over the results, a yellow banner
+appears above them with Restart Now and Restart Later, so the operator can
+review the results first. Restart Later turns the banner into a reminder.
+If the operator closes the validator without choosing either, it asks once
+more (Yes restarts, No closes, Cancel keeps the validator open). A failing unit keeps
 its current name (the report says the rename was skipped), but the report is
 still filed under the entered serial.
 
@@ -226,6 +231,11 @@ run on a test station.
 
 CHANGE HISTORY
 ==============
+
+V27 - RESTART BANNER
+    - The "restart now?" popup no longer covers the results. A banner
+      above the results offers Restart Now / Restart Later; closing the
+      validator without choosing asks once more.
 
 V26 - ONLY REQUIRED NETWORK ADAPTERS
     - Optional network adapters are ignored entirely (not shown, checked
