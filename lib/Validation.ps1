@@ -250,10 +250,14 @@ function Test-SystemAgainstConfig {
 function Find-NetworkAdapterMatches {
     param([object[]]$Expected, $Snapshot)
 
-    return ,(Find-ComponentMatches -Expected $Expected -Actual @($Snapshot.Network.Adapters) -IsMatch {
+    # Find-ComponentMatches already returns its array wrapped once (",$x");
+    # assigning unwraps it, so wrap exactly once again here. Wrapping the call
+    # directly would nest the array and merge every adapter into one item.
+    $matched = Find-ComponentMatches -Expected $Expected -Actual @($Snapshot.Network.Adapters) -IsMatch {
         param($exp, $act)
         Test-ContainsText (Remove-EnumerationSuffix ([string]$act.InterfaceDescription)) (Remove-EnumerationSuffix ([string]$exp.AdapterContains))
-    })
+    }
+    return ,$matched
 }
 
 # The physical adapters that correspond to the Config's network adapters,
@@ -262,7 +266,10 @@ function Get-ConfiguredNetworkAdapters {
     param($Config, $Snapshot)
 
     $expected = @(@($Config.Network.Adapters) | Where-Object { $null -ne $_ })
-    return @(@(Find-NetworkAdapterMatches -Expected $expected -Snapshot $Snapshot) | Where-Object { $null -ne $_ })
+    # Assign first: the matches come back as one wrapped array, and piping the
+    # call directly would pass that whole array along as a single item.
+    $matched = Find-NetworkAdapterMatches -Expected $expected -Snapshot $Snapshot
+    return @($matched | Where-Object { $null -ne $_ })
 }
 
 # Device Manager problem codes that mean the hardware is not actually there:

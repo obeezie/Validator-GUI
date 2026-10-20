@@ -358,6 +358,30 @@ Test-Case "Only adapters the Config lists are reported" {
     Assert-Equal "Intel(R) Ethernet I219-LM" $listed[0].InterfaceDescription
 }
 
+Test-Case "Two or more Config adapters stay separate (traveler, MAC box, report)" {
+    $root = New-TestRoot
+    try {
+        $snap = New-TestSnapshot
+        $config = New-ConfigFromSnapshot -Snapshot $snap -Name "c"
+        Assert-Equal 2 @($config.Network.Adapters).Count
+
+        $listed = @(Get-ConfiguredNetworkAdapters -Config $config -Snapshot $snap)
+        Assert-Equal 2 $listed.Count
+        Assert-Equal "40-1A-58-83-6F-A0|00-11-22-33-44-55" (($listed | ForEach-Object { [string]$_.MacAddress }) -join "|")
+
+        Assert-Equal "001122334455,401A58836FA0" ((Get-SnapshotMacKeys -Snapshot $snap -Config $config) -join ",")
+
+        $rename = New-RenameInfo "SN1" "SN1" $true $false "x"
+        $path = Save-ValidationRun -History (Get-UnitHistory -UnitSerial "SN1") -TestPhase "Tier" -AppMode "Production" `
+            -Config $config -Snapshot $snap -RenameInfo $rename -Results @() -TravelerConfirmed $true
+        $text = Get-Content $path
+        Assert-Equal "Traveler MAC   : 00-11-22-33-44-55|Traveler MAC   : 40-1A-58-83-6F-A0" (@($text | Where-Object { $_ -like "Traveler MAC*" }) -join "|")
+        Assert-Equal 2 @($text | Where-Object { $_ -like "MAC RECORD*" }).Count
+        Assert-Equal "PASS" (Compare-MacsToBaseline -History (Get-UnitHistory -UnitSerial "SN1") -Snapshot $snap -Config $config).Status
+    }
+    finally { Remove-TestRoot $root }
+}
+
 Test-Case "Captured config passes on the same hardware" {
     $snap = New-TestSnapshot
     $results = @(Test-SystemAgainstConfig -Config (New-ConfigFromSnapshot -Snapshot $snap -Name "t") -Snapshot $snap)

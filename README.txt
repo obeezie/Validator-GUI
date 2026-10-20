@@ -1,4 +1,4 @@
-WINDOWS HARDWARE VALIDATOR GUI - V24
+WINDOWS HARDWARE VALIDATOR GUI - V25
 ====================================
 
 Runs on Windows PowerShell 5.1, which is built into Windows 10/11. Nothing
@@ -221,6 +221,12 @@ run on a test station.
 
 CHANGE HISTORY
 ==============
+
+V25 - FIX: CONFIGS WITH TWO OR MORE NETWORK ADAPTERS
+    - V21-V24 merged all of a Config's adapters into one line in the
+      traveler dialog, the Detected MAC Addresses box and the report's
+      NETWORK section. Each adapter is now listed separately. Recorded
+      MAC baselines were not affected.
 
 V24 - UPPERCASE SERIAL NUMBERS
     - The Unit Serial is converted to uppercase for reports, Reports
