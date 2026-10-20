@@ -1,4 +1,4 @@
-WINDOWS HARDWARE VALIDATOR GUI - V22
+WINDOWS HARDWARE VALIDATOR GUI - V23
 ====================================
 
 Runs on Windows PowerShell 5.1, which is built into Windows 10/11. Nothing
@@ -60,9 +60,10 @@ Numbers count as earlier runs, ordered by the timestamp in their file name.
 SYSTEM TRAVELER CONFIRMATION
 ----------------------------
 At every Tier run, and on any run of a unit that has never been confirmed,
-the validator lists every detected MAC address (wired, Wi-Fi and Bluetooth,
-including adapters the Config does not use) and asks whether they match the
-unit's System Traveler. The default answer is No.
+the validator lists the MAC addresses of the network adapters the selected
+Config uses (wired, Wi-Fi or Bluetooth) and asks whether they match the
+unit's System Traveler. Adapters the Config does not use are not shown and
+never affect the MAC check. The default answer is No.
 
     No  - validation stops and nothing is recorded. Check that the unit,
           its serial label and the traveler belong together, and that the
@@ -89,7 +90,8 @@ NETWORK ADAPTERS IN RESULTS AND REPORTS
 ---------------------------------------
 Only the adapters the Config lists are checked and shown (results table,
 Detected MAC Addresses box and report). An optional adapter that is not
-installed gets no row. Windows' "#2"/"#3" numbering of identical adapters is
+installed gets no row. The Traveler Confirmation and MAC check also cover
+only these adapters. Windows' "#2"/"#3" numbering of identical adapters is
 ignored when matching, so re-enumeration between phases does not fail a run.
 
 REQUIRED DEVICES (DEVICE MANAGER)
@@ -213,6 +215,10 @@ run on a test station.
 
 CHANGE HISTORY
 ==============
+
+V23 - TRAVELER SHOWS ONLY THE CONFIG'S ADAPTERS
+    - The Traveler Confirmation lists, and the MAC check compares, only
+      the MAC addresses of adapters the Config uses.
 
 V22 - REQUIRED DEVICES: PRESENCE ONLY
     - A Required Device passes when it is present in Device Manager,

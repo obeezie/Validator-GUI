@@ -31,10 +31,15 @@ function Format-MacKey {
     return (($MacKey -split '(..)' | Where-Object { $_ }) -join '-')
 }
 
+# The MAC addresses that make up a unit's identity: those of the network
+# adapters its Config lists. Adapters the Config does not use are ignored.
+# (Without a Config, every adapter on the unit counts.)
 function Get-SnapshotMacKeys {
-    param($Snapshot)
+    param($Snapshot, $Config = $null)
+
+    $adapters = if ($null -ne $Config) { @(Get-ConfiguredNetworkAdapters -Config $Config -Snapshot $Snapshot) } else { @($Snapshot.Network.Adapters) }
     return @(
-        @($Snapshot.Network.Adapters) |
+        $adapters |
         ForEach-Object { ConvertTo-MacKey ([string]$_.MacAddress) } |
         Where-Object { $_ } |
         Sort-Object -Unique
@@ -253,7 +258,8 @@ function Get-UnitIdentityState {
 function Compare-MacsToBaseline {
     param(
         $History,
-        $Snapshot
+        $Snapshot,
+        $Config = $null
     )
 
     $section = "MAC ADDRESSES"
@@ -263,9 +269,14 @@ function Compare-MacsToBaseline {
         return New-CheckResult $section $check "INFO" "No Traveler Confirmation recorded for this unit yet."
     }
 
+    # Unexpected: a MAC on one of the Config's adapters that was not confirmed.
+    # Missing: a confirmed MAC that is no longer anywhere on the unit. (Units
+    # confirmed before V23 also have their unused adapters' MACs in the
+    # baseline; those are still on the unit, so they are not missing.)
     $expected = @($History.ConfirmedMacKeys)
-    $actual = @(Get-SnapshotMacKeys -Snapshot $Snapshot)
-    $missing = @($expected | Where-Object { $actual -notcontains $_ })
+    $actual = @(Get-SnapshotMacKeys -Snapshot $Snapshot -Config $Config)
+    $onUnit = @(Get-SnapshotMacKeys -Snapshot $Snapshot)
+    $missing = @($expected | Where-Object { $onUnit -notcontains $_ })
     $unexpected = @($actual | Where-Object { $expected -notcontains $_ })
     $confirmedIn = if ($null -ne $History.ConfirmedRunNumber) { "run $($History.ConfirmedRunNumber)" } else { "an earlier run" }
 
@@ -418,11 +429,11 @@ function Save-ValidationRun {
     $lines.Add("DIMM Count     : $([int]$Snapshot.Memory.DimmCount)")
     $lines.Add("")
     if ($TravelerConfirmed) {
-        # Every MAC on the unit, including adapters the Config does not use:
-        # this is the unit's MAC baseline until its next Traveler Confirmation.
+        # The MACs of the Config's adapters, as confirmed against the System
+        # Traveler: the unit's MAC baseline until its next Traveler Confirmation.
         $lines.Add("SYSTEM TRAVELER")
         $lines.Add("-"*72)
-        foreach ($key in @(Get-SnapshotMacKeys -Snapshot $Snapshot)) {
+        foreach ($key in @(Get-SnapshotMacKeys -Snapshot $Snapshot -Config $Config)) {
             $lines.Add("Traveler MAC   : $(Format-MacKey $key)")
         }
         $lines.Add("")

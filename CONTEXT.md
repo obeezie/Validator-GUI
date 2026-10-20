@@ -79,7 +79,7 @@ Every Validation Run and Hardware Change recorded under one Unit Serial.
 _Avoid_: Reports folder, log
 
 **Traveler Confirmation**:
-The operator's confirmation that the MAC addresses detected on the unit (wired, Wi-Fi and Bluetooth) match its System Traveler. It is asked at every Tier run, and on any run of a unit that has none yet; each new one replaces the unit's confirmed MAC addresses. Answering No stops the run without recording anything.
+The operator's confirmation that the MAC addresses of the network adapters the unit's Config uses (wired, Wi-Fi or Bluetooth) match its System Traveler. Adapters the Config does not use are not shown or checked. It is asked at every Tier run, and on any run of a unit that has none yet; each new one replaces the unit's confirmed MAC addresses. Answering No stops the run without recording anything.
 _Avoid_: MAC approval, traveler check
 
 **Baseline**:

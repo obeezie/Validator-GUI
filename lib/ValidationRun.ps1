@@ -99,8 +99,9 @@ function Invoke-ValidationRun {
     # unit has never been confirmed.
     $confirmingTraveler = (-not $history.TravelerConfirmed) -or ($TestPhase -ieq $script:TravelerPhase)
     if ($confirmingTraveler) {
+        # Only the adapters the Config uses are shown and confirmed.
         $adapters = @(
-            @($snapshot.Network.Adapters) |
+            @(Get-ConfiguredNetworkAdapters -Config $config -Snapshot $snapshot) |
             Where-Object { ConvertTo-MacKey ([string]$_.MacAddress) } |
             ForEach-Object {
                 [pscustomobject]@{
@@ -157,7 +158,7 @@ function Invoke-ValidationRun {
         $macResult = New-CheckResult "MAC ADDRESSES" "System Traveler baseline" "PASS" `
             "Confirmed against the System Traveler by the operator in $AppMode mode (this run)."
     } else {
-        $macResult = Compare-MacsToBaseline -History $history -Snapshot $snapshot
+        $macResult = Compare-MacsToBaseline -History $history -Snapshot $snapshot -Config $config
     }
 
     $results = @($results) + @($identityResult) + @($macResult)

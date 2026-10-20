@@ -607,7 +607,7 @@ Test-Case "The latest Traveler Confirmation replaces the MAC baseline" {
     finally { Remove-TestRoot $root }
 }
 
-Test-Case "Report lists only the Config's adapters, but the traveler records every MAC" {
+Test-Case "Report and traveler baseline cover only the Config's adapters" {
     $root = New-TestRoot
     try {
         $snap = New-TestSnapshot
@@ -619,10 +619,11 @@ Test-Case "Report lists only the Config's adapters, but the traveler records eve
         $text = Get-Content $path
         Assert-True ($text -contains "Intel(R) Ethernet I219-LM")
         Assert-True (-not ($text -match 'Realtek')) "the Wi-Fi adapter is not in the Config, so it is not listed"
-        Assert-Equal 2 @($text | Where-Object { $_ -like "Traveler MAC   : *" }).Count
+        Assert-Equal "Traveler MAC   : 00-11-22-33-44-55" (@($text | Where-Object { $_ -like "Traveler MAC   : *" }) -join "|")
 
-        $history = Get-UnitHistory -UnitSerial "SN1"
-        Assert-Equal "PASS" (Compare-MacsToBaseline -History $history -Snapshot $snap).Status "the Wi-Fi MAC is still part of the baseline"
+        # The unused Wi-Fi adapter's MAC is not part of the baseline.
+        $snap.Network.Adapters[0].MacAddress = "AA-AA-AA-AA-AA-AA"
+        Assert-Equal "PASS" (Compare-MacsToBaseline -History (Get-UnitHistory -UnitSerial "SN1") -Snapshot $snap -Config $config).Status
     }
     finally { Remove-TestRoot $root }
 }
@@ -686,12 +687,16 @@ Write-Host "Validation Run"
 
 # Fake machine: a unit on a given motherboard with given MAC addresses.
 function New-FakeMachine {
-    param($Board, [string[]]$Macs, [string]$Name, [string]$Pending = $null, [switch]$RenameFails)
-    $state = @{ Renamed = $null; Board = $Board; Macs = $Macs; Name = $Name; Pending = $Pending; RenameFails = [bool]$RenameFails }
+    param($Board, [string[]]$Macs, [string]$Name, [string]$Pending = $null, [switch]$RenameFails, [object[]]$ExtraAdapters = @())
+    $state = @{ Renamed = $null; Board = $Board; Macs = $Macs; Name = $Name; Pending = $Pending; RenameFails = [bool]$RenameFails; Extra = $ExtraAdapters }
     return @{
         State = $state
         ReadIdentity = { return $state.Board }.GetNewClosure()
-        ReadSnapshot = { return (New-SnapshotOnBoard $state.Board $state.Macs) }.GetNewClosure()
+        ReadSnapshot = {
+            $snap = New-SnapshotOnBoard $state.Board $state.Macs
+            $snap.Network.Adapters = @($snap.Network.Adapters) + @($state.Extra)
+            return $snap
+        }.GetNewClosure()
         ComputerName = { return $state.Name }.GetNewClosure()
         PendingName = { if ($state.Pending) { return $state.Pending } return $state.Name }.GetNewClosure()
         Rename = { param($NewName) if ($state.RenameFails) { throw "Access denied" } $state.Renamed = $NewName }.GetNewClosure()
@@ -713,7 +718,7 @@ function New-FakeOperator {
 function New-RunFixture {
     $root = New-TestRoot
     $config = New-ConfigFromSnapshot -Snapshot (New-SnapshotOnBoard $script:BoardA) -Name "cfg"
-    $config.Network.Adapters = @()
+    $config.Network.Adapters = @([pscustomobject]@{ AdapterContains = "Adapter"; Required = $true; MinimumLinkMbps = $null; RequireUp = $false })
     Save-HardwareConfig -Config $config -Path (Get-ConfigPath "cfg")
     return $root
 }
@@ -796,6 +801,45 @@ Test-Case "Every Tier run asks the traveler again; Yes replaces the unit's MAC b
 
         Assert-Equal "PASS" (Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA @("00-00-00-00-00-02") "SN100") (New-FakeOperator)).OverallResult
         Assert-Equal "FAIL" (Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA @("00-00-00-00-00-01") "SN100") (New-FakeOperator)).OverallResult
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Traveler lists only the Config's adapters; unused adapters never affect the MAC check" {
+    $root = New-RunFixture
+    try {
+        $bluetooth = [pscustomobject]@{ Name = "Bluetooth Network Connection"; InterfaceDescription = "Bluetooth Device (Personal Area Network)"; Status = "Disconnected"; MacAddress = "BB-BB-BB-BB-BB-01"; LinkSpeed = "3 Mbps"; LinkSpeedMbps = 3; IsWireless = $true }
+        $operator = New-FakeOperator
+        $outcome = Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA $script:Mac1 "SN100" -ExtraAdapters @($bluetooth)) $operator -Phase "Tier"
+        Assert-Equal "00-11-22-33-44-55" ($operator.State.TravelerMacs -join ",")
+        Assert-Equal "Adapter 00-11-22-33-44-55" ((@($outcome.Adapters) | ForEach-Object { $_.InterfaceDescription }) -join ",")
+
+        # Different (or no) Bluetooth adapter at the next phase: still PASS.
+        $other = [pscustomobject]@{ Name = "Bluetooth Network Connection"; InterfaceDescription = "Bluetooth Device (Personal Area Network)"; Status = "Disconnected"; MacAddress = "BB-BB-BB-BB-BB-99"; LinkSpeed = "3 Mbps"; LinkSpeedMbps = 3; IsWireless = $true }
+        Assert-Equal "PASS" (Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA $script:Mac1 "SN100" -ExtraAdapters @($other)) (New-FakeOperator)).OverallResult
+        Assert-Equal "PASS" (Invoke-TestRun "SN100" (New-FakeMachine $script:BoardA $script:Mac1 "SN100") (New-FakeOperator)).OverallResult
+    }
+    finally { Remove-TestRoot $root }
+}
+
+Test-Case "Units confirmed before V23 (every MAC in the baseline) still pass" {
+    $root = New-TestRoot
+    try {
+        $snap = New-TestSnapshot
+        $config = New-ConfigFromSnapshot -Snapshot $snap -Name "c"
+        $rename = New-RenameInfo "SN1" "SN1" $true $false "x"
+        # V21/V22 recorded the Wi-Fi MAC too.
+        [void](Save-ValidationRun -History (Get-UnitHistory -UnitSerial "SN1") -TestPhase "Tier" -AppMode "Production" `
+            -Config $config -Snapshot $snap -RenameInfo $rename -Results @() -TravelerConfirmed $true)
+
+        $config.Network.Adapters = @($config.Network.Adapters | Where-Object { $_.AdapterContains -like "*Ethernet*" })
+        $history = Get-UnitHistory -UnitSerial "SN1"
+        Assert-Equal "PASS" (Compare-MacsToBaseline -History $history -Snapshot $snap -Config $config).Status
+
+        $snap.Network.Adapters[1].MacAddress = "CC-CC-CC-CC-CC-CC"
+        $changed = Compare-MacsToBaseline -History $history -Snapshot $snap -Config $config
+        Assert-Equal "FAIL" $changed.Status
+        Assert-True ($changed.Detail -like "*Missing: 00-11-22-33-44-55*Unexpected: CC-CC-CC-CC-CC-CC*") $changed.Detail
     }
     finally { Remove-TestRoot $root }
 }
