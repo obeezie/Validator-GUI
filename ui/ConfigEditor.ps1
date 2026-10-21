@@ -344,6 +344,17 @@ function Show-ConfigEditor {
     $numLogical = New-EditorNumber $general "CPU minimum logical CPUs:" $y $config.CPU.MinimumLogicalCPUs 0 4096 -Hint "0 = not checked"; $y += 34
     $numMemory = New-EditorNumber $general "Memory minimum total GB:" $y $config.Memory.MinimumTotalGB 0.01 100000 -DecimalPlaces 2 -Hint "Capture sets this to 95% of installed RAM"; $y += 34
     $numDimms = New-EditorNumber $general "Expected DIMM count (exact):" $y $config.Memory.ExpectedDIMMs 0 256; $y += 34
+    $txtBiosVersion = New-EditorTextBox $general "BIOS version (exact):" $y $config.Firmware.BiosVersion; $y += 34
+    $txtBiosDate = New-EditorTextBox $general "BIOS date (MM/dd/yyyy):" $y $config.Firmware.BiosDate; $y += 34
+    $txtEcVersion = New-EditorTextBox $general "EC version (xx.xx):" $y $config.Firmware.EcVersion; $y += 34
+
+    $firmwareHint = New-Object System.Windows.Forms.Label
+    $firmwareHint.Text = "Firmware must match exactly. Leave a firmware field blank to skip that check. A unit that does not report an EC version fails the EC check."
+    $firmwareHint.ForeColor = [System.Drawing.Color]::DimGray
+    $firmwareHint.Location = New-Object System.Drawing.Point(15, $y)
+    $firmwareHint.Size = New-Object System.Drawing.Size(800, 36)
+    $general.Controls.Add($firmwareHint)
+    $y += 40
 
     $tabs.TabPages.Add($general)
 
@@ -490,6 +501,9 @@ function Show-ConfigEditor {
                 MinimumLogicalCPUs = [int]$numLogical.Value
                 MinimumTotalGB = [double]$numMemory.Value
                 ExpectedDIMMs = [int]$numDimms.Value
+                BiosVersion = $txtBiosVersion.Text
+                BiosDate = $txtBiosDate.Text
+                EcVersion = $txtEcVersion.Text
             }
 
             $edited = ConvertFrom-ConfigEditorData `

@@ -104,11 +104,37 @@ function Get-HardwareSnapshot {
             TotalGB = $totalMemGB
             DimmCount = [int]$mem.Count
         }
+        Firmware = [pscustomobject]@{
+            BiosVersion = ([string]$bios.SMBIOSBIOSVersion).Trim()
+            BiosDate = Format-BiosDate $bios.ReleaseDate
+            EcVersion = Format-EcVersion $bios.EmbeddedControllerMajorVersion $bios.EmbeddedControllerMinorVersion
+        }
         Storage = [pscustomobject]@{ PhysicalDisks = @($disks) }
         Network = [pscustomobject]@{ Adapters = @($net) }
         GPU = [pscustomobject]@{ Adapters = @($gpus) }
         Devices = @($devices)
     }
+}
+
+# BIOS build date as MM/dd/yyyy. The firmware stores midnight UTC and CIM
+# converts it to local time, which would show the previous day on US clocks,
+# so convert back to UTC before formatting.
+function Format-BiosDate {
+    param($ReleaseDate)
+
+    if ($null -eq $ReleaseDate) { return "" }
+    return ([datetime]$ReleaseDate).ToUniversalTime().ToString('MM/dd/yyyy', [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+# Embedded controller version as xx.xx (major.minor, two digits each).
+# Firmware that does not report it returns 255; that gives $null.
+function Format-EcVersion {
+    param($Major, $Minor)
+
+    if ($null -eq $Major -or $null -eq $Minor -or [int]$Major -eq 255 -or [int]$Minor -eq 255) {
+        return $null
+    }
+    return ("{0:D2}.{1:D2}" -f [int]$Major, [int]$Minor)
 }
 
 # Every device Device Manager knows on this unit (Win32_PnPEntity).

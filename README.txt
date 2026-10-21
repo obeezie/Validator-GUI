@@ -1,4 +1,4 @@
-WINDOWS HARDWARE VALIDATOR GUI - V27
+WINDOWS HARDWARE VALIDATOR GUI - V28
 ====================================
 
 Runs on Windows PowerShell 5.1, which is built into Windows 10/11. Nothing
@@ -105,6 +105,23 @@ for it in Edit Selected Config > Network. Configs captured before V26 have
 every adapter Required: untick the ones that build does not use. Windows' "#2"/"#3" numbering of identical adapters is
 ignored when matching, so re-enumeration between phases does not fail a run.
 
+FIRMWARE (BIOS VERSION, BIOS DATE, EC VERSION)
+----------------------------------------------
+Capture records the unit's BIOS version (SMBIOSBIOSVersion), BIOS build
+date (MM/dd/yyyy) and embedded controller version (xx.xx, e.g. 50.07) in
+the Config. Validation FAILS when any of them differs, and when the unit
+does not report an EC version at all. All three appear in the capture
+review, the results and the report.
+
+Edit them on the General tab of Edit Selected Config; a blank field turns
+that check off. Configs created before V28 have them blank, so firmware is
+not checked until an engineer fills them in or re-captures the Config.
+If a unit does not report its EC version during Capture, the review warns
+and the EC field is left blank.
+
+Check a unit by hand in PowerShell:
+    (Get-CimInstance Win32_BIOS).ReleaseDate.ToUniversalTime().ToString('MM/dd/yyyy')
+
 REQUIRED DEVICES (DEVICE MANAGER)
 ---------------------------------
 A Config can list devices a test procedure expects in Device Manager, such
@@ -133,7 +150,8 @@ CONFIG EDITOR (Engineer Mode)
 Select a configuration and click "Edit Selected Config". Tabs:
 
     General  - manufacturer, model, CPU text, minimum cores / logical
-               CPUs (0 = not checked), minimum RAM, DIMM count
+               CPUs (0 = not checked), minimum RAM, DIMM count, BIOS
+               version, BIOS date, EC version (blank = not checked)
     Storage  - disk name text, bus type, minimum GB, Required
     Network  - adapter text, Required, link must be Up, minimum Mbps
                (blank = no minimum)
@@ -231,6 +249,11 @@ run on a test station.
 
 CHANGE HISTORY
 ==============
+
+V28 - FIRMWARE CHECKS
+    - BIOS version, BIOS build date and EC version are captured, shown,
+      reported and checked (exact match; blank = not checked). A unit
+      that does not report an EC version fails.
 
 V27 - RESTART BANNER
     - The "restart now?" popup no longer covers the results. A banner

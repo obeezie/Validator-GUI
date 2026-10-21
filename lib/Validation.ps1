@@ -97,6 +97,27 @@ function Test-SystemAgainstConfig {
         (Get-PassFail (([string]$Snapshot.System.Model).Trim() -ieq ([string]$Config.System.Model).Trim())) `
         ([string]$Snapshot.System.Model)))
 
+    # Firmware: exact match; a blank Config value means "not checked". An EC
+    # version the firmware does not report fails (something is wrong).
+    $firmwareChecks = @(
+        @{ Check = "BIOS Version"; Expected = [string]$Config.Firmware.BiosVersion; Actual = [string]$Snapshot.Firmware.BiosVersion },
+        @{ Check = "BIOS Date"; Expected = [string]$Config.Firmware.BiosDate; Actual = [string]$Snapshot.Firmware.BiosDate },
+        @{ Check = "EC Version"; Expected = [string]$Config.Firmware.EcVersion; Actual = [string]$Snapshot.Firmware.EcVersion }
+    )
+    foreach ($f in $firmwareChecks) {
+        $expected = $f.Expected.Trim()
+        if (-not $expected) { continue }
+        $actual = $f.Actual.Trim()
+
+        if (-not $actual) {
+            $results.Add((New-CheckResult "FIRMWARE" $f.Check "FAIL" "Not reported by the firmware (expected $expected)"))
+        } elseif ($actual -ieq $expected) {
+            $results.Add((New-CheckResult "FIRMWARE" $f.Check "PASS" $actual))
+        } else {
+            $results.Add((New-CheckResult "FIRMWARE" $f.Check "FAIL" "$actual (expected $expected)"))
+        }
+    }
+
     $results.Add((New-CheckResult "CPU" "Model" `
         (Get-PassFail (Test-ContainsText ([string]$Snapshot.CPU.Model) ([string]$Config.CPU.ModelContains))) `
         ([string]$Snapshot.CPU.Model)))

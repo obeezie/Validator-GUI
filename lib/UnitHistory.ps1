@@ -414,6 +414,10 @@ function Save-ValidationRun {
     $lines.Add("System UUID          : $([string]$Snapshot.System.SystemUUID)")
     $lines.Add("BIOS Serial          : $([string]$Snapshot.System.BiosSerial)")
     $lines.Add("Baseboard Serial     : $([string]$Snapshot.System.BaseboardSerial)")
+    $lines.Add("BIOS Version   : $([string]$Snapshot.Firmware.BiosVersion)")
+    $lines.Add("BIOS Date      : $([string]$Snapshot.Firmware.BiosDate)")
+    $ecText = if ([string]::IsNullOrWhiteSpace([string]$Snapshot.Firmware.EcVersion)) { "NOT REPORTED" } else { [string]$Snapshot.Firmware.EcVersion }
+    $lines.Add("EC Version     : $ecText")
     if ($TravelerConfirmed) {
         $lines.Add("Traveler Confirmation : Confirmed by operator in $AppMode mode")
     }

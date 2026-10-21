@@ -4,6 +4,7 @@
 # Config schema (Configs\<Name>.json):
 #   Name
 #   System  { Manufacturer, Model }
+#   Firmware { BiosVersion, BiosDate (MM/dd/yyyy), EcVersion (xx.xx) }  blank = not checked
 #   CPU     { ModelContains, MinimumCores, MinimumLogicalCPUs }
 #   Memory  { MinimumTotalGB, ExpectedDIMMs }
 #   Storage { PhysicalDisks: [ { FriendlyNameContains, BusType, MinimumGB, Required } ] }
@@ -78,6 +79,11 @@ function ConvertTo-NormalizedConfig {
             Manufacturer = [string]$Raw.System.Manufacturer
             Model = [string]$Raw.System.Model
         }
+        Firmware = [pscustomobject][ordered]@{
+            BiosVersion = ([string]$Raw.Firmware.BiosVersion).Trim()
+            BiosDate = ([string]$Raw.Firmware.BiosDate).Trim()
+            EcVersion = ([string]$Raw.Firmware.EcVersion).Trim()
+        }
         CPU = [pscustomobject][ordered]@{
             ModelContains = [string]$Raw.CPU.ModelContains
             MinimumCores = [int]$Raw.CPU.MinimumCores
@@ -143,6 +149,16 @@ function Test-ConfigDefinition {
     if ([string]::IsNullOrWhiteSpace($Config.CPU.ModelContains)) { $errors.Add("CPU model text is required.") }
     if ([int]$Config.CPU.MinimumCores -lt 1) { $errors.Add("CPU minimum cores must be at least 1.") }
     if ([int]$Config.CPU.MinimumLogicalCPUs -lt 0) { $errors.Add("CPU minimum logical CPUs cannot be negative.") }
+
+    $biosDate = ([string]$Config.Firmware.BiosDate).Trim()
+    $parsedDate = [datetime]::MinValue
+    if ($biosDate -and -not [datetime]::TryParseExact($biosDate, 'MM/dd/yyyy', [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$parsedDate)) {
+        $errors.Add("BIOS date '$biosDate' must be MM/dd/yyyy (for example 05/12/2023), or blank to skip the check.")
+    }
+    $ecVersion = ([string]$Config.Firmware.EcVersion).Trim()
+    if ($ecVersion -and $ecVersion -notmatch '^\d{2,3}\.\d{2,3}$') {
+        $errors.Add("EC version '$ecVersion' must be xx.xx (for example 50.07), or blank to skip the check.")
+    }
     if ([double]$Config.Memory.MinimumTotalGB -le 0) { $errors.Add("Memory minimum total GB must be greater than 0.") }
     if ([int]$Config.Memory.ExpectedDIMMs -lt 0) { $errors.Add("Expected DIMM count cannot be negative.") }
 
@@ -233,6 +249,13 @@ function New-ConfigFromSnapshot {
             Manufacturer = [string]$Snapshot.System.Manufacturer
             Model = [string]$Snapshot.System.Model
         }
+        # Blank means "not checked"; an EC version the firmware does not
+        # report is left blank and flagged in the capture review.
+        Firmware = [pscustomobject][ordered]@{
+            BiosVersion = [string]$Snapshot.Firmware.BiosVersion
+            BiosDate = [string]$Snapshot.Firmware.BiosDate
+            EcVersion = [string]$Snapshot.Firmware.EcVersion
+        }
         CPU = [pscustomobject][ordered]@{
             ModelContains = [string]$Snapshot.CPU.Model
             MinimumCores = [int]$Snapshot.CPU.CoreCount
@@ -317,6 +340,15 @@ function Build-CapturePreviewText {
     $lines.Add("  BIOS Serial:  $([string]$Snapshot.System.BiosSerial)")
     $lines.Add("  Board Serial: $([string]$Snapshot.System.BaseboardSerial)")
     $lines.Add("")
+    $lines.Add("FIRMWARE")
+    $lines.Add("  BIOS Version: $([string]$Snapshot.Firmware.BiosVersion)")
+    $lines.Add("  BIOS Date:    $([string]$Snapshot.Firmware.BiosDate)")
+    if ([string]::IsNullOrWhiteSpace([string]$Snapshot.Firmware.EcVersion)) {
+        $lines.Add("  EC Version:   NOT REPORTED")
+    } else {
+        $lines.Add("  EC Version:   $([string]$Snapshot.Firmware.EcVersion)")
+    }
+    $lines.Add("")
     $lines.Add("CPU")
     $lines.Add("  $([string]$Snapshot.CPU.Model)")
     $lines.Add("  Cores: $([int]$Snapshot.CPU.CoreCount)")
@@ -348,6 +380,14 @@ function Build-CapturePreviewText {
 
     foreach ($g in @($Snapshot.GPU.Adapters)) {
         $lines.Add("  $([string]$g.Name)")
+    }
+
+    if ([string]::IsNullOrWhiteSpace([string]$Snapshot.Firmware.EcVersion)) {
+        $lines.Add("")
+        $lines.Add("WARNING - FIRMWARE")
+        $lines.Add("  This unit does not report an embedded controller (EC) version, which")
+        $lines.Add("  usually means something is wrong. The EC version is left blank (not")
+        $lines.Add("  checked); enter it in Edit Config once the unit is fixed.")
     }
 
     if (@($NetworkWarnings).Count -gt 0) {
@@ -415,7 +455,8 @@ function ConvertTo-EditorBool {
 
 # Builds a config object from the editor's raw values.
 #   General:      hashtable with Name, Manufacturer, Model, CpuModelContains,
-#                 MinimumCores, MinimumLogicalCPUs, MinimumTotalGB, ExpectedDIMMs
+#                 MinimumCores, MinimumLogicalCPUs, MinimumTotalGB, ExpectedDIMMs,
+#                 BiosVersion, BiosDate, EcVersion
 #   StorageRows:  hashtables with FriendlyNameContains, BusType, MinimumGB (text), Required
 #   NetworkRows:  hashtables with AdapterContains, Required, RequireUp, MinimumLinkMbps (text)
 #   GpuRows:      hashtables with ModelContains, Required
@@ -495,6 +536,11 @@ function ConvertFrom-ConfigEditorData {
         System = [pscustomobject][ordered]@{
             Manufacturer = ([string]$General.Manufacturer).Trim()
             Model = ([string]$General.Model).Trim()
+        }
+        Firmware = [pscustomobject][ordered]@{
+            BiosVersion = ([string]$General.BiosVersion).Trim()
+            BiosDate = ([string]$General.BiosDate).Trim()
+            EcVersion = ([string]$General.EcVersion).Trim()
         }
         CPU = [pscustomobject][ordered]@{
             ModelContains = ([string]$General.CpuModelContains).Trim()

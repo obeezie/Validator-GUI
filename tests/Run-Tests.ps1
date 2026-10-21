@@ -82,6 +82,7 @@ function New-TestSnapshot {
         GPU = [pscustomobject]@{ Adapters = @(
             [pscustomobject]@{ Name = "AMD Radeon(TM) Graphics"; DriverVersion = "1" }
         ) }
+        Firmware = [pscustomobject]@{ BiosVersion = "F.12"; BiosDate = "05/12/2023"; EcVersion = "50.07" }
         Devices = @(
             (New-TestDevice "Boot Shield" @("USB\VID_1234&PID_0001&REV_0200", "USB\VID_1234&PID_0001")),
             (New-TestDevice "Intel(R) Ethernet I219-LM" @("PCI\VEN_8086&DEV_15BB&SUBSYS_00001234&REV_10", "PCI\VEN_8086&DEV_15BB&SUBSYS_00001234", "PCI\VEN_8086&DEV_15BB"))
@@ -137,6 +138,18 @@ Test-Case "Serial number format rules" {
     Assert-True ($null -ne (Test-SerialNumberFormat "1234567"))
     Assert-True ($null -ne (Test-SerialNumberFormat "ABCDEFGHIJKLMNOP"))
     Assert-True ($null -ne (Test-SerialNumberFormat "AB_12"))
+}
+
+Test-Case "Firmware values are formatted the way technicians read them" {
+    Assert-ExactEqual "50.07" (Format-EcVersion 50 7)
+    Assert-ExactEqual "08.15" (Format-EcVersion 8 15)
+    Assert-Equal $null (Format-EcVersion 255 255) "255 = not reported by the firmware"
+    Assert-Equal $null (Format-EcVersion $null $null)
+
+    # CIM turns the firmware's midnight-UTC date into local time; the date must not shift.
+    $fromCim = ([datetime]::new(2023, 5, 12, 0, 0, 0, [System.DateTimeKind]::Utc)).ToLocalTime()
+    Assert-ExactEqual "05/12/2023" (Format-BiosDate $fromCim)
+    Assert-ExactEqual "" (Format-BiosDate $null)
 }
 
 Write-Host "Identity"
@@ -261,7 +274,60 @@ Test-Case "Picking a device suggests a hardware ID without the revision" {
     Assert-Equal "ACPI\PNP0A08" (Select-DeviceHardwareId @("ACPI\PNP0A08"))
 }
 
+Test-Case "Capture records firmware; a missing EC version is left blank with a warning" {
+    $snap = New-TestSnapshot
+    $config = New-ConfigFromSnapshot -Snapshot $snap -Name "t"
+    Assert-ExactEqual "F.12" $config.Firmware.BiosVersion
+    Assert-ExactEqual "05/12/2023" $config.Firmware.BiosDate
+    Assert-ExactEqual "50.07" $config.Firmware.EcVersion
+    Assert-True ((Build-CapturePreviewText -Name "t" -Snapshot $snap -NetworkWarnings @()) -match 'EC Version: +50\.07')
+
+    $snap.Firmware.EcVersion = $null
+    $config = New-ConfigFromSnapshot -Snapshot $snap -Name "t"
+    Assert-ExactEqual "" $config.Firmware.EcVersion
+    Assert-True ((Build-CapturePreviewText -Name "t" -Snapshot $snap -NetworkWarnings @()) -match 'does not report an embedded controller')
+}
+
+Test-Case "Firmware in Configs: older configs have it blank; bad formats are refused" {
+    $old = ConvertTo-NormalizedConfig ('{"Name":"x","System":{"Manufacturer":"HP","Model":"M"},"CPU":{"ModelContains":"AMD","MinimumCores":4},"Memory":{"MinimumTotalGB":8,"ExpectedDIMMs":1}}' | ConvertFrom-Json)
+    Assert-ExactEqual "" $old.Firmware.BiosVersion
+    Assert-ExactEqual "" $old.Firmware.BiosDate
+    Assert-ExactEqual "" $old.Firmware.EcVersion
+    Assert-Equal 0 @(Test-ConfigDefinition $old).Count
+
+    $general = @{ Name = "t"; Manufacturer = "HP"; Model = "M"; CpuModelContains = "AMD"; MinimumCores = 4; MinimumLogicalCPUs = 0; MinimumTotalGB = 8; ExpectedDIMMs = 1 }
+    $general.BiosVersion = " F.12 "; $general.BiosDate = "05/12/2023"; $general.EcVersion = "50.07"
+    $ok = ConvertFrom-ConfigEditorData -General $general -StorageRows @() -NetworkRows @() -GpuRows @()
+    Assert-Equal 0 @($ok.Errors).Count (@($ok.Errors) -join "; ")
+    Assert-ExactEqual "F.12" $ok.Config.Firmware.BiosVersion
+
+    $general.BiosDate = "2023-05-12"; $general.EcVersion = "50.7"
+    $bad = ConvertFrom-ConfigEditorData -General $general -StorageRows @() -NetworkRows @() -GpuRows @()
+    Assert-True (@($bad.Errors) -match 'BIOS date').Count (@($bad.Errors) -join "; ")
+    Assert-True (@($bad.Errors) -match 'EC version').Count (@($bad.Errors) -join "; ")
+}
+
 Write-Host "Validation"
+
+Test-Case "Firmware: exact matches pass, differences and an unreported EC fail, blank is not checked" {
+    $snap = New-TestSnapshot
+    $config = New-ConfigFromSnapshot -Snapshot $snap -Name "t"
+    $rows = @(Get-ResultFor (Test-SystemAgainstConfig -Config $config -Snapshot $snap) "FIRMWARE" "*")
+    Assert-Equal "BIOS Version,BIOS Date,EC Version" (($rows | ForEach-Object { $_.Check }) -join ",")
+    Assert-Equal "PASS,PASS,PASS" (($rows | ForEach-Object { $_.Status }) -join ",")
+
+    $snap.Firmware.BiosVersion = "F.13"
+    $snap.Firmware.BiosDate = "06/01/2023"
+    $snap.Firmware.EcVersion = $null
+    $rows = @(Get-ResultFor (Test-SystemAgainstConfig -Config $config -Snapshot $snap) "FIRMWARE" "*")
+    Assert-Equal "FAIL,FAIL,FAIL" (($rows | ForEach-Object { $_.Status }) -join ",")
+    Assert-True ($rows[0].Detail -like "*F.13*expected F.12*") $rows[0].Detail
+    Assert-True ($rows[2].Detail -like "*not reported*") $rows[2].Detail
+
+    $config.Firmware.BiosDate = ""
+    $config.Firmware.EcVersion = ""
+    Assert-Equal "BIOS Version" ((@(Get-ResultFor (Test-SystemAgainstConfig -Config $config -Snapshot $snap) "FIRMWARE" "*") | ForEach-Object { $_.Check }) -join ",")
+}
 
 Test-Case "Adapter enumeration (#2, #3) does not affect matching" {
     $snap = New-TestSnapshot
@@ -737,6 +803,9 @@ Test-Case "Report keeps the fields older tools and people read" {
         $text = Get-Content $path
         Assert-True ($text -contains "Serial Number  : SN1")
         Assert-True ($text -contains "Overall Result : PASS")
+        Assert-True ($text -contains "BIOS Version   : F.12")
+        Assert-True ($text -contains "BIOS Date      : 05/12/2023")
+        Assert-True ($text -contains "EC Version     : 50.07")
         Assert-True ($text -contains "Traveler Confirmation : Confirmed by operator in Production mode")
         Assert-True (@($text | Where-Object { $_ -like "MAC RECORD     : *" }).Count -ge 1)
         Assert-Equal "c" (Get-UnitHistory -UnitSerial "SN1").LatestRun.ConfigName
